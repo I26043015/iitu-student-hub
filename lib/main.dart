@@ -24,7 +24,7 @@ class IituApp extends StatelessWidget {
   );
 }
 
-// Логотип создаётся прямо в Flutter, поэтому файл PNG не требуется.
+// Логотип создаётся средствами Flutter, отдельный PNG не нужен.
 class IituMark extends StatelessWidget {
   const IituMark({super.key, this.small = false});
 
@@ -167,9 +167,7 @@ class _CampusPageState extends State<CampusPage> {
             labelText: 'What needs to be done?',
             border: OutlineInputBorder(),
           ),
-          onSubmitted: (_) {
-            Navigator.pop(dialog, input.text.trim());
-          },
+          onSubmitted: (_) => Navigator.pop(dialog, input.text.trim()),
         ),
         actions: [
           TextButton(
@@ -223,9 +221,7 @@ class _CampusPageState extends State<CampusPage> {
 
   Future<void> toggleClub(String club) async {
     setState(() {
-      if (!savedClubs.remove(club)) {
-        savedClubs.add(club);
-      }
+      if (!savedClubs.remove(club)) savedClubs.add(club);
     });
 
     try {
@@ -239,11 +235,7 @@ class _CampusPageState extends State<CampusPage> {
     }
 
     if (mounted) {
-      toast(
-        savedClubs.contains(club)
-            ? '$club saved'
-            : '$club removed',
-      );
+      toast(savedClubs.contains(club) ? '$club saved' : '$club removed');
     }
   }
 
@@ -301,7 +293,6 @@ class _CampusPageState extends State<CampusPage> {
     );
 
     final values = fields.map((field) => field.text.trim()).toList();
-
     for (final field in fields) {
       field.dispose();
     }
@@ -385,104 +376,102 @@ class _CampusPageState extends State<CampusPage> {
     );
   }
 
-  Widget panel(Widget child, {Color color = Colors.white}) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(19),
-        border: Border.all(color: const Color(0xFFEAE7E4)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x09000000),
-            blurRadius: 15,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
-      child: child,
-    );
-  }
+  Widget panel(
+      Widget child, {
+        Color color = Colors.white,
+      }) =>
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(color: const Color(0xFFEAE7E4)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x09000000),
+              blurRadius: 15,
+              offset: Offset(0, 5),
+            ),
+          ],
+        ),
+        child: child,
+      );
 
-  Widget heading(String title, String caption) {
-    return Column(
+  Widget heading(String title, String caption) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        title,
+        style: const TextStyle(
+          fontSize: 25,
+          color: ink,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(height: 4),
+      Text(caption, style: const TextStyle(color: muted)),
+    ],
+  );
+
+  Widget hero(bool wide) => Container(
+    width: double.infinity,
+    constraints: const BoxConstraints(minHeight: 275),
+    padding: EdgeInsets.all(wide ? 33 : 23),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(22),
+      gradient: const LinearGradient(
+        colors: [ink, Color(0xFF51252A), red],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+    ),
+    child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Text(
-          title,
-          style: const TextStyle(
-            fontSize: 25,
-            color: ink,
-            fontWeight: FontWeight.w800,
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          child: const IituMark(small: true),
+        ),
+        const SizedBox(height: 25),
+        const Text(
+          'WELCOME TO IITU',
+          style: TextStyle(
+            color: Color(0xFFFFC9CC),
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+            letterSpacing: 1.8,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 9),
         Text(
-          caption,
-          style: const TextStyle(color: muted),
+          'Welcome, ${name.trim().split(' ').last}!\n'
+              'Your campus, your opportunities.',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: wide ? 38 : 31,
+            fontWeight: FontWeight.w800,
+            height: 1.1,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          programme.isEmpty
+              ? 'Student at IITU · Services, clubs and your plans in one place.'
+              : '$programme · Services, clubs and your plans in one place.',
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 15,
+          ),
         ),
       ],
-    );
-  }
-
-  Widget hero(bool wide) {
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 275),
-      padding: EdgeInsets.all(wide ? 33 : 23),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(22),
-        gradient: const LinearGradient(
-          colors: [ink, Color(0xFF51252A), red],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: const IituMark(small: true),
-          ),
-          const SizedBox(height: 25),
-          const Text(
-            'WELCOME TO IITU',
-            style: TextStyle(
-              color: Color(0xFFFFC9CC),
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              letterSpacing: 1.8,
-            ),
-          ),
-          const SizedBox(height: 9),
-          Text(
-            'Your campus,\nyour opportunities.',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: wide ? 38 : 31,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
-            ),
-          ),
-          const SizedBox(height: 12),
-          const Text(
-            'Services, student life and your plans in one place.',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 15,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+    ),
+  );
 
   Widget service(
       IconData icon,
@@ -490,179 +479,169 @@ class _CampusPageState extends State<CampusPage> {
       String description,
       String info,
       String task,
-      ) {
-    return InkWell(
-      onTap: () => detail(
-        title,
-        info,
-        action: 'Add to my reminders',
-        onAction: () => addReminder(task),
-      ),
-      borderRadius: BorderRadius.circular(19),
-      child: panel(
-        Row(
-          children: [
-            CircleAvatar(
-              radius: 26,
-              backgroundColor: const Color(0xFFFFEAEB),
-              child: Icon(icon, color: red),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    description,
-                    style: const TextStyle(
-                      color: muted,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: red),
-          ],
+      ) =>
+      InkWell(
+        onTap: () => detail(
+          title,
+          info,
+          action: 'Add to my reminders',
+          onAction: () => addReminder(task),
         ),
-      ),
-    );
-  }
+        borderRadius: BorderRadius.circular(19),
+        child: panel(
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: const Color(0xFFFFEAEB),
+                child: Icon(icon, color: red),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      description,
+                      style: const TextStyle(
+                        color: muted,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: red),
+            ],
+          ),
+        ),
+      );
 
   Widget announcement(
       IconData icon,
       String label,
       String title,
       String description,
-      ) {
-    return InkWell(
-      onTap: () => detail(
-        title,
-        description,
-        action: 'Remind me to learn more',
-        onAction: () => addReminder(title),
-      ),
-      borderRadius: BorderRadius.circular(19),
-      child: panel(
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: red, size: 30),
-            const SizedBox(height: 13),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 11,
-                color: red,
-                letterSpacing: 1,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 7),
-            Text(
-              description,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: muted,
-                height: 1.4,
-              ),
-            ),
-            const SizedBox(height: 15),
-            const Text(
-              'Read more  →',
-              style: TextStyle(
-                color: red,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
+      ) =>
+      InkWell(
+        onTap: () => detail(
+          title,
+          description,
+          action: 'Remind me to learn more',
+          onAction: () => addReminder(title),
         ),
-      ),
-    );
-  }
-
-  Widget remindersPanel() {
-    return panel(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+        borderRadius: BorderRadius.circular(19),
+        child: panel(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(
-                Icons.notifications_active_outlined,
-                color: red,
-              ),
-              const SizedBox(width: 9),
-              const Expanded(
-                child: Text(
-                  'My reminders',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 20,
-                  ),
+              Icon(icon, color: red, size: 30),
+              const SizedBox(height: 13),
+              Text(
+                label,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: red,
+                  letterSpacing: 1,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
+              const SizedBox(height: 8),
               Text(
-                '${reminders.length}',
+                title,
                 style: const TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(
+                description,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: muted, height: 1.4),
+              ),
+              const SizedBox(height: 15),
+              const Text(
+                'Read more  →',
+                style: TextStyle(
                   color: red,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          if (reminders.isEmpty)
-            const Text(
-              'Nothing planned yet. Press + to add a reminder.',
-              style: TextStyle(color: muted),
+        ),
+      );
+
+  Widget remindersPanel() => panel(
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.notifications_active_outlined, color: red),
+            const SizedBox(width: 9),
+            const Expanded(
+              child: Text(
+                'My reminders',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 20,
+                ),
+              ),
             ),
-          for (final task in reminders) ...[
-            const Divider(),
-            Row(
-              children: [
-                const Icon(
-                  Icons.check_circle_outline,
-                  color: red,
-                  size: 21,
-                ),
-                const SizedBox(width: 11),
-                Expanded(child: Text(task)),
-                IconButton(
-                  tooltip: 'Remove reminder',
-                  onPressed: () => removeReminder(task),
-                  icon: const Icon(Icons.close, size: 19),
-                ),
-              ],
+            Text(
+              '${reminders.length}',
+              style: const TextStyle(
+                color: red,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ],
-          const SizedBox(height: 8),
-          TextButton.icon(
-            onPressed: () => addReminder(),
-            icon: const Icon(Icons.add),
-            label: const Text('Add reminder'),
+        ),
+        const SizedBox(height: 12),
+        if (reminders.isEmpty)
+          const Text(
+            'Nothing planned yet. Press + to add a reminder.',
+            style: TextStyle(color: muted),
+          ),
+        for (final task in reminders) ...[
+          const Divider(),
+          Row(
+            children: [
+              const Icon(
+                Icons.check_circle_outline,
+                color: red,
+                size: 21,
+              ),
+              const SizedBox(width: 11),
+              Expanded(child: Text(task)),
+              IconButton(
+                tooltip: 'Remove reminder',
+                onPressed: () => removeReminder(task),
+                icon: const Icon(Icons.close, size: 19),
+              ),
+            ],
           ),
         ],
-      ),
-    );
-  }
+        const SizedBox(height: 8),
+        TextButton.icon(
+          onPressed: () => addReminder(),
+          icon: const Icon(Icons.add),
+          label: const Text('Add reminder'),
+        ),
+      ],
+    ),
+  );
 
   Widget home(bool wide) {
     final library = service(
@@ -716,26 +695,28 @@ class _CampusPageState extends State<CampusPage> {
                         size: 32,
                       ),
                       const SizedBox(height: 13),
-                      const Text(
-                        'Made for IITU students',
-                        style: TextStyle(
+                      Text(
+                        name,
+                        style: const TextStyle(
                           fontSize: 21,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                       const SizedBox(height: 9),
-                      const Text(
-                        'Save clubs you like and keep your study plans nearby.',
-                        style: TextStyle(
+                      Text(
+                        programme.isEmpty
+                            ? 'Your IITU student dashboard. Add your programme and student ID in your profile.'
+                            : '$programme · Your IITU student dashboard.',
+                        style: const TextStyle(
                           color: muted,
                           height: 1.45,
                         ),
                       ),
                       const SizedBox(height: 14),
                       TextButton.icon(
-                        onPressed: () => go(1),
+                        onPressed: () => go(2),
                         icon: const Icon(Icons.arrow_forward),
-                        label: const Text('Explore campus life'),
+                        label: const Text('Open my profile'),
                       ),
                     ],
                   ),
@@ -796,62 +777,71 @@ class _CampusPageState extends State<CampusPage> {
     );
   }
 
-  Widget club(String title, String description, IconData icon) {
+  Widget club(
+      String title,
+      String description,
+      IconData icon,
+      ) {
     final saved = savedClubs.contains(title);
 
-    return panel(
-      Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: const Color(0xFFFFEAEB),
-                child: Icon(icon, color: red),
-              ),
-              const Spacer(),
-              IconButton(
-                tooltip: saved
-                    ? 'Remove saved club'
-                    : 'Save club',
-                icon: Icon(
-                  saved
-                      ? Icons.bookmark
-                      : Icons.bookmark_border,
-                  color: red,
+    return Card(
+      margin: EdgeInsets.zero,
+      color: Colors.white,
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: Color(0xFFEAE7E4)),
+        borderRadius: BorderRadius.circular(19),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: const Color(0xFFFFEAEB),
+                  child: Icon(icon, color: red),
                 ),
-                onPressed: () => toggleClub(title),
+                const Spacer(),
+                IconButton(
+                  tooltip:
+                  saved ? 'Remove saved club' : 'Save club',
+                  icon: Icon(
+                    saved ? Icons.bookmark : Icons.bookmark_border,
+                    color: red,
+                  ),
+                  onPressed: () => toggleClub(title),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
               ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 21,
-              fontWeight: FontWeight.w800,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            description,
-            style: const TextStyle(
-              color: muted,
-              height: 1.4,
+            const SizedBox(height: 8),
+            Text(
+              description,
+              style: const TextStyle(
+                color: muted,
+                height: 1.4,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          TextButton.icon(
-            onPressed: () => toggleClub(title),
-            icon: Icon(
-              saved
-                  ? Icons.check
-                  : Icons.bookmark_add_outlined,
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: () => toggleClub(title),
+              icon: Icon(
+                saved ? Icons.check : Icons.bookmark_add_outlined,
+              ),
+              label: Text(saved ? 'Saved' : 'Save club'),
             ),
-            label: Text(saved ? 'Saved' : 'Save club'),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -878,10 +868,7 @@ class _CampusPageState extends State<CampusPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        heading(
-          'Campus life',
-          'Discover communities at IITU',
-        ),
+        heading('Campus life', 'Discover communities at IITU'),
         const SizedBox(height: 16),
         panel(
           Row(
@@ -928,42 +915,41 @@ class _CampusPageState extends State<CampusPage> {
       IconData icon,
       String label,
       String value,
-      ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          Icon(icon, color: red),
-          const SizedBox(width: 13),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: muted,
-                    fontSize: 12,
+      ) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            Icon(icon, color: red),
+            const SizedBox(width: 13),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: muted,
+                      fontSize: 12,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  value.isEmpty
-                      ? 'Tap Edit profile to add'
-                      : value,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: value.isEmpty ? muted : ink,
+                  const SizedBox(height: 3),
+                  Text(
+                    value.isEmpty
+                        ? 'Tap Edit profile to add'
+                        : value,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: value.isEmpty ? muted : ink,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      );
 
   Widget profile(bool wide) {
     final identity = panel(
@@ -1061,7 +1047,30 @@ class _CampusPageState extends State<CampusPage> {
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.white,
       toolbarHeight: 70,
-      title: const IituMark(small: true),
+      title: MediaQuery.sizeOf(context).width >= 600
+          ? const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IituMark(small: true),
+          SizedBox(width: 18),
+          Text(
+            'Student Hub',
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w800,
+              color: ink,
+            ),
+          ),
+        ],
+      )
+          : const Text(
+        'IITU Student Hub',
+        style: TextStyle(
+          fontSize: 19,
+          fontWeight: FontWeight.w800,
+          color: ink,
+        ),
+      ),
       actions: [
         IconButton(
           tooltip: 'My reminders',
