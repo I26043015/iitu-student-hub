@@ -24,7 +24,6 @@ class IituApp extends StatelessWidget {
   );
 }
 
-// Логотип создаётся средствами Flutter, отдельный PNG не нужен.
 class IituMark extends StatelessWidget {
   const IituMark({super.key, this.small = false});
 
@@ -101,8 +100,8 @@ class _CampusPageState extends State<CampusPage> {
   Set<String> savedClubs = {};
 
   String name = 'Akhmetova Azhar';
-  String id = '';
-  String programme = '';
+  String id = 'I26043015';
+  String programme = 'Network Security';
   String email = '';
 
   @override
@@ -126,8 +125,8 @@ class _CampusPageState extends State<CampusPage> {
         reminders = r ?? [];
         savedClubs = (c ?? []).toSet();
         name = n ?? name;
-        id = s ?? '';
-        programme = p ?? '';
+        id = (s == null || s.trim().isEmpty) ? id : s;
+        programme = (p == null || p.trim().isEmpty) ? programme : p;
         email = e ?? '';
       });
     } catch (_) {
@@ -382,6 +381,7 @@ class _CampusPageState extends State<CampusPage> {
       }) =>
       Container(
         width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 2),
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
           color: color,
@@ -480,50 +480,223 @@ class _CampusPageState extends State<CampusPage> {
       String info,
       String task,
       ) =>
-      InkWell(
+      CampusActionCard(
+        icon: icon,
+        title: title,
+        description: description,
         onTap: () => detail(
           title,
           info,
           action: 'Add to my reminders',
           onAction: () => addReminder(task),
         ),
-        borderRadius: BorderRadius.circular(19),
-        child: panel(
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: const Color(0xFFFFEAEB),
-                child: Icon(icon, color: red),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      description,
-                      style: const TextStyle(
-                        color: muted,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
+      );
+
+  Widget academicSnapshot() => panel(
+    Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.school_outlined, color: red),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Academic snapshot',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-              const Icon(Icons.chevron_right, color: red),
-            ],
-          ),
+            ),
+            Container(
+              alignment: Alignment.center,
+              constraints: const BoxConstraints(minHeight: 32),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 6,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEAEB),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                'YEAR 3',
+                style: TextStyle(
+                  color: red,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
         ),
-      );
+        const SizedBox(height: 15),
+        LayoutBuilder(
+          builder: (context, box) {
+            final columns = box.maxWidth >= 520 ? 3 : 2;
+            final width =
+                (box.maxWidth - (columns - 1) * 10) / columns;
+
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                AcademicTile(
+                  width: width,
+                  icon: Icons.calendar_today_outlined,
+                  value: '5th',
+                  label: 'Semester',
+                  tint: const Color(0xFFFFF0F0),
+                ),
+                AcademicTile(
+                  width: width,
+                  icon: Icons.workspace_premium_outlined,
+                  value: '3.50',
+                  label: 'CGPA',
+                  tint: const Color(0xFFEDF2FA),
+                ),
+                AcademicTile(
+                  width: width,
+                  icon: Icons.menu_book_outlined,
+                  value: '18',
+                  label: 'Credits',
+                  tint: const Color(0xFFEAF5EE),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    ),
+    color: const Color(0xFFF0F0F2),
+  );
+
+  Widget datedCampusNotice() => InkWell(
+    onTap: () => detail(
+      'Course registration',
+      'Demo reminder: check your selected courses before 12 October 2026. Confirm the actual deadline with your university.',
+      action: 'Add to my reminders',
+      onAction: () => addReminder('Check course registration'),
+    ),
+    borderRadius: BorderRadius.circular(19),
+    child: panel(
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 52,
+            height: 56,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFEAEB),
+              borderRadius: BorderRadius.circular(13),
+            ),
+            child: const Icon(Icons.campaign_outlined, color: red),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Course registration',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+                SizedBox(height: 5),
+                Text(
+                  'Review your selected courses and check the registration deadline.',
+                  style: TextStyle(color: muted, height: 1.35),
+                ),
+                SizedBox(height: 9),
+                Text(
+                  'DEMO REMINDER · 12 OCT 2026',
+                  style: TextStyle(
+                    color: red,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget studentLifeEvent() => InkWell(
+    onTap: () => detail(
+      'Cybersecurity Club Meetup',
+      'Demo event: 15 October 2026 at 16:00, campus innovation space. Check the real schedule before attending.',
+      action: 'Add to my reminders',
+      onAction: () => addReminder('Cybersecurity Club meetup'),
+    ),
+    borderRadius: BorderRadius.circular(19),
+    child: panel(
+      Row(
+        children: [
+          Container(
+            width: 64,
+            height: 69,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: const Color(0xFFEDF2FA),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '15',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  'OCT',
+                  style: TextStyle(
+                    color: red,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Cybersecurity Club Meetup',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  '16:00 · Campus innovation space',
+                  style: TextStyle(color: muted),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'Demo event · Tap for details',
+                  style: TextStyle(color: red, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget announcement(
       IconData icon,
@@ -588,7 +761,10 @@ class _CampusPageState extends State<CampusPage> {
       children: [
         Row(
           children: [
-            const Icon(Icons.notifications_active_outlined, color: red),
+            const Icon(
+              Icons.notifications_active_outlined,
+              color: red,
+            ),
             const SizedBox(width: 9),
             const Expanded(
               child: Text(
@@ -644,21 +820,43 @@ class _CampusPageState extends State<CampusPage> {
   );
 
   Widget home(bool wide) {
-    final library = service(
-      Icons.local_library_outlined,
-      'Library',
-      'Study resources and reading',
-      'Use this section to plan library study, find learning materials and organise your reading tasks.',
-      'Visit the university library',
-    );
-
-    final career = service(
-      Icons.work_outline,
-      'Career Center',
-      'Internships and career planning',
-      'Plan your CV, internship search and questions for the university Career Center.',
-      'Prepare CV for Career Center',
-    );
+    final actions = [
+      service(
+        Icons.event_note_outlined,
+        'Timetable',
+        'Plan your classes',
+        'Use this section to keep track of your classes. This prototype does not connect to the official university timetable.',
+        'Check my timetable',
+      ),
+      service(
+        Icons.bar_chart_outlined,
+        'Results',
+        'Review your progress',
+        'Use this section to plan a review of your grades. Official results are not connected to this prototype.',
+        'Check my results',
+      ),
+      service(
+        Icons.local_library_outlined,
+        'Library',
+        'Study resources',
+        'Plan library study, find learning materials and organise your reading tasks.',
+        'Visit the university library',
+      ),
+      service(
+        Icons.support_agent_outlined,
+        'Helpdesk',
+        'Ask for support',
+        'Write down a question for university support and follow up through official channels.',
+        'Contact the helpdesk',
+      ),
+      service(
+        Icons.work_outline,
+        'Career Center',
+        'Internships and CV',
+        'Plan your CV, internship search and questions for the university Career Center.',
+        'Prepare CV for Career Center',
+      ),
+    ];
 
     final exchange = announcement(
       Icons.public,
@@ -689,10 +887,9 @@ class _CampusPageState extends State<CampusPage> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.school_outlined,
-                        color: red,
-                        size: 32,
+                      const CircleAvatar(
+                        backgroundColor: Color(0xFFFFEAEB),
+                        child: Icon(Icons.person_outline, color: red),
                       ),
                       const SizedBox(height: 13),
                       Text(
@@ -704,9 +901,12 @@ class _CampusPageState extends State<CampusPage> {
                       ),
                       const SizedBox(height: 9),
                       Text(
-                        programme.isEmpty
-                            ? 'Your IITU student dashboard. Add your programme and student ID in your profile.'
-                            : '$programme · Your IITU student dashboard.',
+                        'ID: $id',
+                        style: const TextStyle(color: muted),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        '$programme · IITU student dashboard.',
                         style: const TextStyle(
                           color: muted,
                           height: 1.45,
@@ -724,36 +924,76 @@ class _CampusPageState extends State<CampusPage> {
               ),
             ],
           )
-        else
+        else ...[
           hero(false),
+          const SizedBox(height: 14),
+          panel(
+            Row(
+              children: [
+                const CircleAvatar(
+                  backgroundColor: Color(0xFFFFEAEB),
+                  child: Icon(Icons.person_outline, color: red),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
+                        ),
+                      ),
+                      Text(
+                        'ID: $id · $programme',
+                        style: const TextStyle(
+                          color: muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Open my profile',
+                  onPressed: () => go(2),
+                  icon: const Icon(Icons.chevron_right, color: red),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 32),
+        academicSnapshot(),
         const SizedBox(height: 32),
         heading(
           'Student services',
           'Useful places for your studies and career',
         ),
         const SizedBox(height: 16),
-        if (wide)
-          Row(
-            children: [
-              Expanded(child: library),
-              const SizedBox(width: 16),
-              Expanded(child: career),
-            ],
-          )
-        else
-          Column(
-            children: [
-              library,
-              const SizedBox(height: 12),
-              career,
-            ],
-          ),
-        const SizedBox(height: 32),
-        heading(
-          'Announcements',
-          'Ideas and opportunities for students',
+        LayoutBuilder(
+          builder: (context, box) {
+            final columns = box.maxWidth >= 880 ? 3 : 2;
+            final cardWidth =
+                (box.maxWidth - (columns - 1) * 12) / columns;
+
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                for (final action in actions)
+                  SizedBox(width: cardWidth, child: action),
+              ],
+            );
+          },
         ),
+        const SizedBox(height: 32),
+        heading('Campus update', 'Announcements and reminders'),
         const SizedBox(height: 16),
+        datedCampusNotice(),
+        const SizedBox(height: 14),
         if (wide)
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -771,6 +1011,10 @@ class _CampusPageState extends State<CampusPage> {
               projects,
             ],
           ),
+        const SizedBox(height: 32),
+        heading('Student life', 'Upcoming activities on campus'),
+        const SizedBox(height: 16),
+        studentLifeEvent(),
         const SizedBox(height: 32),
         remindersPanel(),
       ],
@@ -806,8 +1050,7 @@ class _CampusPageState extends State<CampusPage> {
                 ),
                 const Spacer(),
                 IconButton(
-                  tooltip:
-                  saved ? 'Remove saved club' : 'Save club',
+                  tooltip: saved ? 'Remove saved club' : 'Save club',
                   icon: Icon(
                     saved ? Icons.bookmark : Icons.bookmark_border,
                     color: red,
@@ -877,9 +1120,7 @@ class _CampusPageState extends State<CampusPage> {
               const SizedBox(width: 10),
               Text(
                 'Saved clubs: ${savedClubs.length}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                ),
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
             ],
           ),
@@ -935,9 +1176,7 @@ class _CampusPageState extends State<CampusPage> {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    value.isEmpty
-                        ? 'Tap Edit profile to add'
-                        : value,
+                    value.isEmpty ? 'Tap Edit profile to add' : value,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -1143,31 +1382,33 @@ class _CampusPageState extends State<CampusPage> {
         ],
       ),
     ),
-    body: LayoutBuilder(
-      builder: (context, box) {
-        final wide = box.maxWidth >= 900;
+    body: SafeArea(
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final wide = box.maxWidth >= 900;
 
-        return SingleChildScrollView(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1200),
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  wide ? 26 : 16,
-                  24,
-                  wide ? 26 : 16,
-                  105,
+          return SingleChildScrollView(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1200),
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    wide ? 26 : 16,
+                    24,
+                    wide ? 26 : 16,
+                    105,
+                  ),
+                  child: index == 0
+                      ? home(wide)
+                      : index == 1
+                      ? campus(wide)
+                      : profile(wide),
                 ),
-                child: index == 0
-                    ? home(wide)
-                    : index == 1
-                    ? campus(wide)
-                    : profile(wide),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     ),
     floatingActionButton: FloatingActionButton.extended(
       onPressed: () => addReminder(),
@@ -1197,6 +1438,135 @@ class _CampusPageState extends State<CampusPage> {
           label: 'Profile',
         ),
       ],
+    ),
+  );
+}
+
+class AcademicTile extends StatelessWidget {
+  const AcademicTile({
+    super.key,
+    required this.width,
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.tint,
+  });
+
+  final double width;
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: 116,
+    padding: const EdgeInsets.all(13),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: const Color(0xFFEAE7E4)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 31,
+          height: 31,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: tint,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(icon, size: 18, color: red),
+        ),
+        const Spacer(),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 12, color: muted),
+        ),
+      ],
+    ),
+  );
+}
+
+class CampusActionCard extends StatelessWidget {
+  const CampusActionCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.transparent,
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(19),
+      child: Container(
+        width: double.infinity,
+        height: 145,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(19),
+          border: Border.all(color: const Color(0xFFEAE7E4)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x09000000),
+              blurRadius: 15,
+              offset: Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEAEB),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: red, size: 22),
+            ),
+            const Spacer(),
+            Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              description,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: muted),
+            ),
+          ],
+        ),
+      ),
     ),
   );
 }
