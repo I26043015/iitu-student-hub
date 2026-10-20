@@ -2434,11 +2434,23 @@ class _RequestsScreenState extends State<RequestsScreen>
                         CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            request.data['subject'] as String? ??
-                                '',
+                            request.data['studentName'] as String? ??
+                                'Student name not provided',
                             style: const TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          SelectableText(
+                            'Student ID: ${request.data['studentId'] ?? 'Not provided'}',
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            request.data['subject'] as String? ?? '',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           const SizedBox(height: 8),
