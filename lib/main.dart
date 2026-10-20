@@ -1,7 +1,14 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'firebase_options.dart';
 
 const red = Color(0xFFAD232C);
 const ink = Color(0xFF18191C);
@@ -10,11 +17,121 @@ const muted = Color(0xFF686B73);
 const line = Color(0xFFE7E5E1);
 
 final hub = HubData();
+final requestStore = CampusRequestStore();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await hub.load();
-  runApp(const IituApp());
+  runApp(const FirebaseStartup());
+}
+
+// Firebase initialization and authentication happen before the main app.
+class FirebaseStartup extends StatefulWidget {
+  const FirebaseStartup({super.key});
+
+  @override
+  State<FirebaseStartup> createState() => _FirebaseStartupState();
+}
+
+class _FirebaseStartupState extends State<FirebaseStartup> {
+  late Future<void> startup = initialize();
+
+  Future<void> initialize() async {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+
+    // Restore the previous anonymous account before creating another UID.
+    final auth = FirebaseAuth.instance;
+    final restored = await auth.authStateChanges().first.timeout(
+      const Duration(seconds: 20),
+    );
+
+    if (restored == null) {
+      await auth.signInAnonymously().timeout(
+        const Duration(seconds: 25),
+      );
+    }
+
+    await requestStore.initialize();
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<void>(
+    future: startup,
+    builder: (context, snapshot) {
+      if (snapshot.connectionState == ConnectionState.done &&
+          !snapshot.hasError) {
+        return const IituApp();
+      }
+
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: ThemeData(
+          colorScheme: ColorScheme.fromSeed(seedColor: red),
+        ),
+        home: Scaffold(
+          backgroundColor: bg,
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 600),
+                  child: Panel(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const UniversityLogo(width: 207),
+                        const SizedBox(height: 28),
+                        if (!snapshot.hasError) ...[
+                          const CircularProgressIndicator(),
+                          const SizedBox(height: 20),
+                          const Text('Connecting your Student Hub…'),
+                        ] else ...[
+                          const Icon(
+                            Icons.cloud_off_outlined,
+                            color: red,
+                            size: 40,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'Firebase setup needs attention',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(firebaseMessage(snapshot.error!)),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Generate lib/firebase_options.dart with '
+                                'flutterfire configure, enable Anonymous '
+                                'authentication and create the Firestore database.',
+                          ),
+                          const SizedBox(height: 20),
+                          FilledButton.icon(
+                            onPressed: () {
+                              setState(() => startup = initialize());
+                            },
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Try again'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
 }
 
 class IituApp extends StatelessWidget {
@@ -84,15 +201,12 @@ class IituApp extends StatelessWidget {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(
-            color: red,
-            width: 2,
-          ),
+          borderSide: const BorderSide(color: red, width: 2),
         ),
       ),
     ),
 
-    // 1. Dashboard is registered once; home is not duplicated.
+    // Named routes are registered once.
     initialRoute: AppRoutes.home,
     routes: {
       AppRoutes.home: (_) => const DashboardScreen(),
@@ -102,17 +216,8 @@ class IituApp extends StatelessWidget {
       AppRoutes.profile: (_) => const ProfileScreen(),
       AppRoutes.resources: (_) => const ResourcesScreen(),
       AppRoutes.requests: (_) => const RequestsScreen(),
-      AppRoutes.helpdesk: (_) => CampusRequestPage(
-        student: {
-          'name': hub.name,
-          'id': hub.studentId,
-          'email': hub.email,
-        },
-        onRecord: hub.recordRequest,
-      ),
+      AppRoutes.helpdesk: (_) => const CampusRequestPage(),
     },
-
-    // 2. Dynamic route checks its argument before showing details.
     onGenerateRoute: (settings) {
       if (settings.name == AppRoutes.serviceDetail) {
         final selected = settings.arguments;
@@ -120,8 +225,7 @@ class IituApp extends StatelessWidget {
         if (selected is CampusService) {
           return MaterialPageRoute<ServiceResult>(
             settings: settings,
-            builder: (_) =>
-                ServiceDetailsScreen(service: selected),
+            builder: (_) => ServiceDetailsScreen(service: selected),
           );
         }
 
@@ -136,8 +240,6 @@ class IituApp extends StatelessWidget {
 
       return null;
     },
-
-    // 3. Unregistered routes receive a clear fallback.
     onUnknownRoute: (settings) => MaterialPageRoute<void>(
       settings: settings,
       builder: (_) => UnknownRouteScreen(
@@ -147,7 +249,6 @@ class IituApp extends StatelessWidget {
   );
 }
 
-// Route names are defined once and reused throughout the application.
 class AppRoutes {
   static const home = '/';
   static const timetable = '/timetable';
@@ -179,8 +280,8 @@ class CampusService {
   final String location;
   final String openingHours;
   final String contact;
-  final String status;
   final IconData icon;
+  final String status;
 }
 
 class CampusEvent {
@@ -222,23 +323,21 @@ class CampusLesson {
   final String room;
   final String type;
 
-  String get dayName => [
-    'Monday',
-    'Tuesday',
-    'Wednesday',
-    'Thursday',
-    'Friday',
-  ][day - 1];
+  String get dayName =>
+      ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][day - 1];
 
   String get time =>
       '${hour.toString().padLeft(2, '0')}:'
           '${minute.toString().padLeft(2, '0')}';
 
   DateTime nextStart(DateTime now) {
-    var start =
-    DateTime(now.year, now.month, now.day, hour, minute).add(
-      Duration(days: (day - now.weekday + 7) % 7),
-    );
+    var start = DateTime(
+      now.year,
+      now.month,
+      now.day,
+      hour,
+      minute,
+    ).add(Duration(days: (day - now.weekday + 7) % 7));
 
     if (start.isBefore(now)) {
       start = start.add(const Duration(days: 7));
@@ -255,7 +354,7 @@ class ServiceResult {
   final String reference;
 }
 
-// All service locations, contacts and hours below are sample data.
+// Campus content below is sample data for the teaching prototype.
 const campusServices = [
   CampusService(
     'it',
@@ -366,64 +465,34 @@ const campusEvents = [
 
 const campusLessons = [
   CampusLesson(
-    1, 9, 0,
-    'Cross-platform development',
-    'Lab 204',
-    'Practice',
+    1, 9, 0, 'Cross-platform development', 'Lab 204', 'Practice',
   ),
   CampusLesson(
-    1, 11, 0,
-    'Network security',
-    'Room 301',
-    'Lecture',
+    1, 11, 0, 'Network security', 'Room 301', 'Lecture',
   ),
   CampusLesson(
-    2, 9, 0,
-    'Machine learning',
-    'Lab 306',
-    'Practice',
+    2, 9, 0, 'Machine learning', 'Lab 306', 'Practice',
   ),
   CampusLesson(
-    2, 14, 0,
-    'ERP programming',
-    'Room 210',
-    'Lecture',
+    2, 14, 0, 'ERP programming', 'Room 210', 'Lecture',
   ),
   CampusLesson(
-    3, 10, 0,
-    'Cloud & virtualization',
-    'Lab 302',
-    'Practice',
+    3, 10, 0, 'Cloud & virtualization', 'Lab 302', 'Practice',
   ),
   CampusLesson(
-    3, 13, 0,
-    'Network security',
-    'Lab 204',
-    'Practice',
+    3, 13, 0, 'Network security', 'Lab 204', 'Practice',
   ),
   CampusLesson(
-    4, 9, 0,
-    'ERP programming',
-    'Lab 305',
-    'Practice',
+    4, 9, 0, 'ERP programming', 'Lab 305', 'Practice',
   ),
   CampusLesson(
-    4, 11, 0,
-    'Machine learning',
-    'Room 301',
-    'Lecture',
+    4, 11, 0, 'Machine learning', 'Room 301', 'Lecture',
   ),
   CampusLesson(
-    5, 10, 0,
-    'Cross-platform development',
-    'Room 210',
-    'Lecture',
+    5, 10, 0, 'Cross-platform development', 'Room 210', 'Lecture',
   ),
   CampusLesson(
-    5, 13, 0,
-    'Cloud & virtualization',
-    'Room 304',
-    'Lecture',
+    5, 13, 0, 'Cloud & virtualization', 'Room 304', 'Lecture',
   ),
 ];
 
@@ -431,38 +500,33 @@ const campusResources = [
   {
     'title': 'Library guide',
     'tag': 'STUDY',
-    'body':
-    'Organise your reading list by course, record citations '
+    'body': 'Organise your reading list by course, record citations '
         'while you read and keep track of the sources used '
         'in each assignment.',
   },
   {
     'title': 'Internship checklist',
     'tag': 'CAREER',
-    'body':
-    'Prepare a one-page CV, add two relevant projects, '
+    'body': 'Prepare a one-page CV, add two relevant projects, '
         'practise your introduction and keep a list '
         'of application deadlines.',
   },
   {
     'title': 'Account security',
     'tag': 'IT SUPPORT',
-    'body':
-    'Use unique passwords and multi-factor authentication. '
+    'body': 'Use unique passwords and multi-factor authentication. '
         'Never share login codes. Report suspicious messages '
         'through campus support.',
   },
   {
     'title': 'Exchange preparation',
     'tag': 'MOBILITY',
-    'body':
-    'Prepare a transcript, course comparison, language '
+    'body': 'Prepare a transcript, course comparison, language '
         'certificate and budget. Confirm actual deadlines '
         'with your university mobility office.',
   },
 ];
 
-// Shared local state survives route changes and browser refreshes.
 class HubData extends ChangeNotifier {
   final storage = SharedPreferencesAsync();
 
@@ -475,19 +539,16 @@ class HubData extends ChangeNotifier {
   Set<String> registered = {};
   Set<String> bookmarks = {};
   Set<String> appointments = {};
+
+  // Legacy local requests are kept separately from real Firestore records.
   List<Map<String, String>> requests = [];
 
   String? storageWarning;
 
   CampusLesson get nextLesson {
     final now = DateTime.now();
-
     final ordered = [...campusLessons]
-      ..sort(
-            (a, b) =>
-            a.nextStart(now).compareTo(b.nextStart(now)),
-      );
-
+      ..sort((a, b) => a.nextStart(now).compareTo(b.nextStart(now)));
     return ordered.first;
   }
 
@@ -497,7 +558,6 @@ class HubData extends ChangeNotifier {
 
       if (raw != null) {
         final m = jsonDecode(raw) as Map<String, dynamic>;
-
         name = m['name'] as String? ?? name;
         studentId = m['id'] as String? ?? studentId;
         programme = m['programme'] as String? ?? programme;
@@ -509,20 +569,15 @@ class HubData extends ChangeNotifier {
         registered = Set<String>.from(m['registered'] ?? []);
         bookmarks = Set<String>.from(m['bookmarks'] ?? []);
         appointments = Set<String>.from(m['appointments'] ?? []);
-
         requests = (m['requests'] as List? ?? [])
             .map((r) => Map<String, String>.from(r as Map))
             .toList();
       } else {
         reminders =
-            await storage.getStringList('iitu_tasks_restored') ??
-                [];
-
-        name =
-            await storage.getString('iitu_name_restored') ?? name;
+            await storage.getStringList('iitu_tasks_restored') ?? [];
+        name = await storage.getString('iitu_name_restored') ?? name;
         studentId =
-            await storage.getString('iitu_id_restored') ??
-                studentId;
+            await storage.getString('iitu_id_restored') ?? studentId;
         programme =
             await storage.getString('iitu_programme_restored') ??
                 programme;
@@ -550,35 +605,28 @@ class HubData extends ChangeNotifier {
           'requests': requests,
         }),
       );
-
       storageWarning = null;
     } catch (_) {
-      storageWarning =
-      'Browser storage failed. Changes remain '
+      storageWarning = 'Browser storage failed. Changes remain '
           'available in this session.';
     }
 
     notifyListeners();
   }
-
-  Future<void> recordRequest(Map<String, String> record) async {
-    requests.insert(0, record);
-    await save();
-  }
 }
 
-void notify(BuildContext context, String text) =>
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(text),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+void notify(BuildContext context, String text) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(text),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+}
 
-// 4. Each screen blocks repeated navigation taps while its child is open.
-// Child screens have their own guard, allowing nested navigation.
+// A navigation guard prevents rapid taps from opening duplicate routes.
 mixin RouteGuard<T extends StatefulWidget> on State<T> {
   bool opening = false;
 
@@ -587,7 +635,6 @@ mixin RouteGuard<T extends StatefulWidget> on State<T> {
         Object? arguments,
       }) async {
     if (opening) return null;
-
     opening = true;
 
     try {
@@ -603,7 +650,6 @@ mixin RouteGuard<T extends StatefulWidget> on State<T> {
 
   Future<R?> openDirect<R>(Route<R> route) async {
     if (opening) return null;
-
     opening = true;
 
     try {
@@ -615,10 +661,7 @@ mixin RouteGuard<T extends StatefulWidget> on State<T> {
 }
 
 class UniversityLogo extends StatelessWidget {
-  const UniversityLogo({
-    super.key,
-    this.width = 170,
-  });
+  const UniversityLogo({super.key, this.width = 170});
 
   final double width;
 
@@ -687,9 +730,7 @@ class _ActionTileState extends State<ActionTile> {
     child: AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       decoration: BoxDecoration(
-        color: hovered
-            ? const Color(0xFFFFF8F8)
-            : Colors.white,
+        color: hovered ? const Color(0xFFFFF8F8) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: hovered ? red : line),
       ),
@@ -751,10 +792,7 @@ Widget pageTitle(String text, String subtitle) => Padding(
         ),
       ),
       const SizedBox(height: 10),
-      Text(
-        subtitle,
-        style: const TextStyle(color: muted),
-      ),
+      Text(subtitle, style: const TextStyle(color: muted)),
     ],
   ),
 );
@@ -776,11 +814,10 @@ Widget responsiveGrid(
       int maximum = 3,
     }) =>
     LayoutBuilder(
-      builder: (c, box) {
+      builder: (context, box) {
         final count =
         (box.maxWidth / minimum).floor().clamp(1, maximum);
-        final width =
-            (box.maxWidth - 16 * (count - 1)) / count;
+        final width = (box.maxWidth - 16 * (count - 1)) / count;
 
         return Wrap(
           spacing: 16,
@@ -805,11 +842,7 @@ Widget twoColumns(Widget a, Widget b) => LayoutBuilder(
   )
       : Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      a,
-      const SizedBox(height: 24),
-      b,
-    ],
+    children: [a, const SizedBox(height: 24), b],
   ),
 );
 
@@ -842,8 +875,7 @@ class CampusShell extends StatelessWidget {
             fontWeight: FontWeight.w700,
           ),
         ),
-
-        // 5. Back reveals the previous route, not a new Dashboard.
+        // Pop reveals the previous screen instead of adding a new Home.
         leading: home
             ? null
             : IconButton(
@@ -892,8 +924,7 @@ class CampusShell extends StatelessWidget {
                     ),
                     Text(
                       hub.programme,
-                      style:
-                      const TextStyle(color: muted),
+                      style: const TextStyle(color: muted),
                     ),
                   ],
                 ),
@@ -902,32 +933,32 @@ class CampusShell extends StatelessWidget {
                 (
                 AppRoutes.timetable,
                 'Timetable',
-                Icons.calendar_month_outlined,
+                Icons.calendar_month_outlined
                 ),
                 (
                 AppRoutes.services,
                 'Campus services',
-                Icons.support_agent,
+                Icons.support_agent
                 ),
                 (
                 AppRoutes.events,
                 'Campus events',
-                Icons.event_outlined,
+                Icons.event_outlined
                 ),
                 (
                 AppRoutes.profile,
                 'Student profile',
-                Icons.person_outline,
+                Icons.person_outline
                 ),
                 (
                 AppRoutes.resources,
                 'Resource library',
-                Icons.menu_book_outlined,
+                Icons.menu_book_outlined
                 ),
                 (
                 AppRoutes.requests,
                 'My requests',
-                Icons.inbox_outlined,
+                Icons.inbox_outlined
                 ),
               ])
                 ListTile(
@@ -954,14 +985,12 @@ class CampusShell extends StatelessWidget {
         unselectedFontSize: 10,
         onTap: (i) {
           if (i > 0) {
-            onNavigate?.call(
-              [
-                AppRoutes.home,
-                AppRoutes.services,
-                AppRoutes.events,
-                AppRoutes.profile,
-              ][i],
-            );
+            onNavigate?.call([
+              AppRoutes.home,
+              AppRoutes.services,
+              AppRoutes.events,
+              AppRoutes.profile,
+            ][i]);
           }
         },
         items: const [
@@ -992,11 +1021,9 @@ class CampusShell extends StatelessWidget {
           ),
           child: Center(
             child: ConstrainedBox(
-              constraints:
-              const BoxConstraints(maxWidth: 1240),
+              constraints: const BoxConstraints(maxWidth: 1240),
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   child,
                   const SizedBox(height: 48),
@@ -1039,11 +1066,7 @@ Future<void> addStudentReminder(
     builder: (_) => ReminderDialog(initial: initial),
   );
 
-  if (!context.mounted ||
-      result == null ||
-      result.isEmpty) {
-    return;
-  }
+  if (!context.mounted || result == null || result.isEmpty) return;
 
   hub.reminders.add(result);
   await hub.save();
@@ -1103,30 +1126,25 @@ class ReminderPanel extends StatelessWidget {
           for (var i = 0; i < hub.reminders.length; i++)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
-              controlAffinity:
-              ListTileControlAffinity.leading,
+              controlAffinity: ListTileControlAffinity.leading,
               value: false,
               title: Text(hub.reminders[i]),
               onChanged: (_) async {
+                if (i >= hub.reminders.length) return;
                 final item = hub.reminders.removeAt(i);
                 await hub.save();
-
                 if (!context.mounted) return;
 
                 ScaffoldMessenger.of(context)
                   ..hideCurrentSnackBar()
                   ..showSnackBar(
                     SnackBar(
-                      content:
-                      const Text('Reminder completed.'),
+                      content: const Text('Reminder completed.'),
                       action: SnackBarAction(
                         label: 'Undo',
                         onPressed: () {
                           hub.reminders.insert(
-                            i.clamp(
-                              0,
-                              hub.reminders.length,
-                            ).toInt(),
+                            i.clamp(0, hub.reminders.length).toInt(),
                             item,
                           );
                           hub.save();
@@ -1146,8 +1164,7 @@ class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  State<DashboardScreen> createState() =>
-      _DashboardScreenState();
+  State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen>
@@ -1177,8 +1194,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 box.maxWidth > 650 ? 40 : 26,
               ),
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
                     'IITU / STUDENT EXPERIENCE',
@@ -1221,8 +1237,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       FilledButton.icon(
                         onPressed: () =>
                             openNamed(AppRoutes.services),
-                        icon:
-                        const Icon(Icons.arrow_outward),
+                        icon: const Icon(Icons.arrow_outward),
                         label: const Text(
                           'Explore campus services',
                         ),
@@ -1265,7 +1280,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: hub,
-    builder: (_, __) {
+    builder: (_, _) {
       final next = hub.nextLesson;
 
       return CampusShell(
@@ -1283,8 +1298,7 @@ class _DashboardScreenState extends State<DashboardScreen>
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             pageTitle(
-              'Welcome back, '
-                  '${hub.name.trim().split(' ').first}.',
+              'Welcome back, ${hub.name.trim().split(' ').first}.',
               'A clearer view of your campus day.',
             ),
             hero(),
@@ -1296,31 +1310,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                   title: 'Timetable',
                   subtitle: 'Plan your study week',
                   icon: Icons.calendar_month_outlined,
-                  onTap: () =>
-                      openNamed(AppRoutes.timetable),
+                  onTap: () => openNamed(AppRoutes.timetable),
                 ),
                 ActionTile(
                   title: 'Campus services',
                   subtitle: 'Find the right support team',
                   icon: Icons.support_agent,
-                  onTap: () =>
-                      openNamed(AppRoutes.services),
+                  onTap: () => openNamed(AppRoutes.services),
                 ),
                 ActionTile(
                   title: 'Campus events',
-                  subtitle:
-                  'Learn, connect and participate',
+                  subtitle: 'Learn, connect and participate',
                   icon: Icons.event_outlined,
-                  onTap: () =>
-                      openNamed(AppRoutes.events),
+                  onTap: () => openNamed(AppRoutes.events),
                 ),
                 ActionTile(
                   title: 'Student profile',
-                  subtitle:
-                  'Your details and saved activity',
+                  subtitle: 'Your details and saved activity',
                   icon: Icons.person_outline,
-                  onTap: () =>
-                      openNamed(AppRoutes.profile),
+                  onTap: () => openNamed(AppRoutes.profile),
                 ),
               ],
               maximum: 4,
@@ -1329,8 +1337,7 @@ class _DashboardScreenState extends State<DashboardScreen>
             twoColumns(
               Panel(
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
                       'NEXT SAMPLE CLASS',
@@ -1351,8 +1358,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '${next.dayName} · ${next.time} · '
-                          '${next.room}',
+                      '${next.dayName} · ${next.time} · ${next.room}',
                       style: const TextStyle(color: muted),
                     ),
                     const SizedBox(height: 20),
@@ -1362,8 +1368,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       icon: const Icon(
                         Icons.calendar_month_outlined,
                       ),
-                      label:
-                      const Text('View timetable'),
+                      label: const Text('View timetable'),
                     ),
                   ],
                 ),
@@ -1376,16 +1381,13 @@ class _DashboardScreenState extends State<DashboardScreen>
                 title: 'Resource library',
                 subtitle: 'Search and save useful guides',
                 icon: Icons.menu_book_outlined,
-                onTap: () =>
-                    openNamed(AppRoutes.resources),
+                onTap: () => openNamed(AppRoutes.resources),
               ),
               ActionTile(
                 title: 'My requests',
-                subtitle:
-                '${hub.requests.length} demo requests recorded',
+                subtitle: 'View your server-confirmed requests',
                 icon: Icons.inbox_outlined,
-                onTap: () =>
-                    openNamed(AppRoutes.requests),
+                onTap: () => openNamed(AppRoutes.requests),
               ),
             ]),
           ],
@@ -1400,8 +1402,7 @@ class TimetableScreen extends StatefulWidget {
   const TimetableScreen({super.key});
 
   @override
-  State<TimetableScreen> createState() =>
-      _TimetableScreenState();
+  State<TimetableScreen> createState() => _TimetableScreenState();
 }
 
 class _TimetableScreenState extends State<TimetableScreen> {
@@ -1410,7 +1411,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: hub,
-    builder: (_, __) {
+    builder: (_, _) {
       final next = hub.nextLesson;
 
       return CampusShell(
@@ -1429,19 +1430,16 @@ class _TimetableScreenState extends State<TimetableScreen> {
               children: [
                 for (var i = 0; i < 6; i++)
                   ChoiceChip(
-                    label: Text(
-                      [
-                        'All days',
-                        'Monday',
-                        'Tuesday',
-                        'Wednesday',
-                        'Thursday',
-                        'Friday',
-                      ][i],
-                    ),
+                    label: Text([
+                      'All days',
+                      'Monday',
+                      'Tuesday',
+                      'Wednesday',
+                      'Thursday',
+                      'Friday',
+                    ][i]),
                     selected: filter == i,
-                    onSelected: (_) =>
-                        setState(() => filter = i),
+                    onSelected: (_) => setState(() => filter = i),
                   ),
               ],
             ),
@@ -1449,18 +1447,15 @@ class _TimetableScreenState extends State<TimetableScreen> {
             for (final lesson in campusLessons)
               if (filter == 0 || filter == lesson.day)
                 Padding(
-                  padding:
-                  const EdgeInsets.only(bottom: 14),
+                  padding: const EdgeInsets.only(bottom: 14),
                   child: Panel(
                     padding: 20,
                     child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (identical(lesson, next))
                           const Padding(
-                            padding:
-                            EdgeInsets.only(bottom: 10),
+                            padding: EdgeInsets.only(bottom: 10),
                             child: Text(
                               'NEXT SAMPLE CLASS',
                               style: TextStyle(
@@ -1478,8 +1473,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
                                 lesson.time,
                                 style: const TextStyle(
                                   fontSize: 18,
-                                  fontWeight:
-                                  FontWeight.w800,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
                             ),
@@ -1492,21 +1486,18 @@ class _TimetableScreenState extends State<TimetableScreen> {
                             Expanded(
                               child: Column(
                                 crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
+                                CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     lesson.module,
                                     style: const TextStyle(
                                       fontSize: 17,
-                                      fontWeight:
-                                      FontWeight.w700,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                   Text(
                                     '${lesson.dayName} · '
-                                        '${lesson.room} · '
-                                        '${lesson.type}',
+                                        '${lesson.room} · ${lesson.type}',
                                     style: const TextStyle(
                                       color: muted,
                                       fontSize: 13,
@@ -1517,14 +1508,12 @@ class _TimetableScreenState extends State<TimetableScreen> {
                             ),
                             IconButton(
                               tooltip: 'Add class reminder',
-                              onPressed: () =>
-                                  addStudentReminder(
-                                    context,
-                                    '${lesson.module} · '
-                                        '${lesson.dayName}, '
-                                        '${lesson.time} · '
-                                        '${lesson.room}',
-                                  ),
+                              onPressed: () => addStudentReminder(
+                                context,
+                                '${lesson.module} · '
+                                    '${lesson.dayName}, ${lesson.time} · '
+                                    '${lesson.room}',
+                              ),
                               icon: const Icon(
                                 Icons.add_alert_outlined,
                               ),
@@ -1544,7 +1533,7 @@ class _TimetableScreenState extends State<TimetableScreen> {
   );
 }
 
-// SCREEN 3: CAMPUS SERVICES
+// SCREEN 3: SERVICES
 class ServicesScreen extends StatefulWidget {
   const ServicesScreen({super.key});
 
@@ -1566,7 +1555,6 @@ class _ServicesScreenState extends State<ServicesScreen>
   }
 
   Future<void> details(CampusService service) async {
-    // 6. Pass the selected object and await a typed returned result.
     final result = await openNamed<ServiceResult>(
       AppRoutes.serviceDetail,
       arguments: service,
@@ -1584,7 +1572,7 @@ class _ServicesScreenState extends State<ServicesScreen>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: hub,
-    builder: (_, __) => CampusShell(
+    builder: (_, _) => CampusShell(
       title: 'Campus services',
       controller: scroll,
       child: Column(
@@ -1595,8 +1583,7 @@ class _ServicesScreenState extends State<ServicesScreen>
             'Explore sample campus services. '
                 'Open a service to see its own details.',
           ),
-
-          // Extension: the retained route preserves search and scroll.
+          // Keeping this route preserves its search and scroll position.
           TextField(
             controller: search,
             onChanged: (v) =>
@@ -1626,10 +1613,8 @@ class _ServicesScreenState extends State<ServicesScreen>
                 Panel(
                   padding: 20,
                   child: Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Extension: shared icon flies into Details.
                       Hero(
                         tag: 'service-${service.id}',
                         child: Material(
@@ -1661,15 +1646,12 @@ class _ServicesScreenState extends State<ServicesScreen>
                       const SizedBox(height: 8),
                       Text(
                         service.description,
-                        style:
-                        const TextStyle(color: muted),
+                        style: const TextStyle(color: muted),
                       ),
                       const SizedBox(height: 18),
-                      if (hub.appointments
-                          .contains(service.id))
+                      if (hub.appointments.contains(service.id))
                         const Padding(
-                          padding:
-                          EdgeInsets.only(bottom: 10),
+                          padding: EdgeInsets.only(bottom: 10),
                           child: Text(
                             'Demo interest saved',
                             style: TextStyle(
@@ -1710,14 +1692,12 @@ class ServiceDetailsScreen extends StatefulWidget {
       _ServiceDetailsScreenState();
 }
 
-class _ServiceDetailsScreenState
-    extends State<ServiceDetailsScreen>
+class _ServiceDetailsScreenState extends State<ServiceDetailsScreen>
     with RouteGuard<ServiceDetailsScreen> {
   bool saving = false;
 
   Future<void> requestAppointment() async {
     if (saving) return;
-
     setState(() => saving = true);
 
     hub.appointments.add(widget.service.id);
@@ -1725,7 +1705,7 @@ class _ServiceDetailsScreenState
 
     if (!mounted) return;
 
-    // 7. Result returns to Services by popping this route.
+    // Return a result to Services using pop.
     Navigator.pop(
       context,
       ServiceResult(
@@ -1735,41 +1715,36 @@ class _ServiceDetailsScreenState
     );
   }
 
-  Widget info(
-      IconData icon,
-      String label,
-      String value,
-      ) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: red),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    label,
-                    style: const TextStyle(
-                      color: muted,
-                      fontSize: 12,
-                    ),
-                  ),
-                  SelectableText(
-                    value,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+  Widget info(IconData icon, String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 18),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, color: red),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: const TextStyle(
+                  color: muted,
+                  fontSize: 12,
+                ),
               ),
-            ),
-          ],
+              SelectableText(
+                value,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
-      );
+      ],
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -1795,11 +1770,7 @@ class _ServiceDetailsScreenState
                         color: bg,
                         borderRadius: BorderRadius.circular(20),
                       ),
-                      child: Icon(
-                        s.icon,
-                        color: red,
-                        size: 40,
-                      ),
+                      child: Icon(s.icon, color: red, size: 40),
                     ),
                   ),
                 ),
@@ -1822,10 +1793,7 @@ class _ServiceDetailsScreenState
                 const SizedBox(height: 20),
                 Text(
                   s.description,
-                  style: const TextStyle(
-                    fontSize: 17,
-                    height: 1.6,
-                  ),
+                  style: const TextStyle(fontSize: 17, height: 1.6),
                 ),
               ],
             ),
@@ -1854,10 +1822,7 @@ class _ServiceDetailsScreenState
                 const Text(
                   'Locations, hours and contacts are illustrative. '
                       'No appointment is sent to university staff.',
-                  style: TextStyle(
-                    color: muted,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: muted, fontSize: 12),
                 ),
                 const SizedBox(height: 24),
                 Wrap(
@@ -1865,8 +1830,7 @@ class _ServiceDetailsScreenState
                   runSpacing: 12,
                   children: [
                     FilledButton.icon(
-                      onPressed:
-                      saving ? null : requestAppointment,
+                      onPressed: saving ? null : requestAppointment,
                       icon: const Icon(
                         Icons.event_available_outlined,
                       ),
@@ -1883,11 +1847,9 @@ class _ServiceDetailsScreenState
                       child: const Text('Open request form'),
                     ),
                     TextButton(
-                      onPressed: saving
-                          ? null
-                          : () => Navigator.pop(context),
-                      child:
-                      const Text('Return to services'),
+                      onPressed:
+                      saving ? null : () => Navigator.pop(context),
+                      child: const Text('Return to services'),
                     ),
                   ],
                 ),
@@ -1900,7 +1862,7 @@ class _ServiceDetailsScreenState
   }
 }
 
-// SCREEN 5: CAMPUS EVENTS
+// SCREEN 5: EVENTS
 class EventsScreen extends StatefulWidget {
   const EventsScreen({super.key});
 
@@ -1911,7 +1873,7 @@ class EventsScreen extends StatefulWidget {
 class _EventsScreenState extends State<EventsScreen>
     with RouteGuard<EventsScreen> {
   Future<void> details(CampusEvent event) async {
-    // 8. Direct push + MaterialPageRoute passes the selected Event.
+    // Direct Navigator.push with MaterialPageRoute and a selected model.
     final result = await openDirect<bool>(
       MaterialPageRoute<bool>(
         settings: RouteSettings(
@@ -1935,7 +1897,7 @@ class _EventsScreenState extends State<EventsScreen>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: hub,
-    builder: (_, __) => CampusShell(
+    builder: (_, _) => CampusShell(
       title: 'Campus events',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1949,14 +1911,9 @@ class _EventsScreenState extends State<EventsScreen>
             for (final event in campusEvents)
               Panel(
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      event.icon,
-                      size: 40,
-                      color: red,
-                    ),
+                    Icon(event.icon, size: 40, color: red),
                     const SizedBox(height: 22),
                     Text(
                       event.category,
@@ -1985,8 +1942,7 @@ class _EventsScreenState extends State<EventsScreen>
                     const SizedBox(height: 6),
                     Text(
                       event.venue,
-                      style:
-                      const TextStyle(color: muted),
+                      style: const TextStyle(color: muted),
                     ),
                     const SizedBox(height: 18),
                     Text(
@@ -2001,8 +1957,7 @@ class _EventsScreenState extends State<EventsScreen>
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
                       onPressed: () => details(event),
-                      icon:
-                      const Icon(Icons.arrow_outward),
+                      icon: const Icon(Icons.arrow_outward),
                       label: Text(
                         hub.registered.contains(event.id)
                             ? 'Manage registration'
@@ -2019,7 +1974,6 @@ class _EventsScreenState extends State<EventsScreen>
   );
 }
 
-// Extension: a separate Event Details route receives a CampusEvent.
 class EventDetailsScreen extends StatefulWidget {
   const EventDetailsScreen({
     super.key,
@@ -2038,11 +1992,9 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
 
   Future<void> register() async {
     if (saving) return;
-
     setState(() => saving = true);
 
     final joined = hub.registered.contains(widget.event.id);
-
     if (joined) {
       hub.registered.remove(widget.event.id);
     } else {
@@ -2051,9 +2003,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
 
     await hub.save();
 
-    if (mounted) {
-      Navigator.pop(context, !joined);
-    }
+    if (mounted) Navigator.pop(context, !joined);
   }
 
   @override
@@ -2072,16 +2022,12 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
             pageTitle(e.title, '${e.date} · ${e.time}'),
             Text(
               e.venue,
-              style: const TextStyle(
-                fontWeight: FontWeight.w700,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 20),
             Text(e.description),
             const SizedBox(height: 24),
-            Text(
-              'Student: ${hub.name}\nContact: ${hub.email}',
-            ),
+            Text('Student: ${hub.name}\nContact: ${hub.email}'),
             const SizedBox(height: 14),
             const Text(
               'This is a local demo registration. '
@@ -2107,7 +2053,7 @@ class _EventDetailsScreenState extends State<EventDetailsScreen> {
   }
 }
 
-// SCREEN 6: STUDENT PROFILE
+// SCREEN 6: PROFILE
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
@@ -2121,7 +2067,6 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Future<void> edit() async {
     if (editing) return;
-
     editing = true;
 
     final result = await showDialog<Map<String, String>>(
@@ -2137,7 +2082,6 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
 
     editing = false;
-
     if (!mounted || result == null) return;
 
     hub.name = result['name']!;
@@ -2147,15 +2091,13 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     await hub.save();
 
-    if (mounted) {
-      notify(context, 'Student profile updated.');
-    }
+    if (mounted) notify(context, 'Student profile updated.');
   }
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: hub,
-    builder: (_, __) => CampusShell(
+    builder: (_, _) => CampusShell(
       title: 'Student profile',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2208,29 +2150,22 @@ class _ProfileScreenState extends State<ProfileScreen>
           const SizedBox(height: 24),
           responsiveGrid([
             ActionTile(
-              title:
-              '${hub.registered.length} registrations',
-              subtitle:
-              'Manage your demo event activity',
+              title: '${hub.registered.length} registrations',
+              subtitle: 'Manage your demo event activity',
               icon: Icons.event_outlined,
               onTap: () => openNamed(AppRoutes.events),
             ),
             ActionTile(
-              title:
-              '${hub.bookmarks.length} saved resources',
+              title: '${hub.bookmarks.length} saved resources',
               subtitle: 'Open your resource library',
               icon: Icons.bookmark_outline,
-              onTap: () =>
-                  openNamed(AppRoutes.resources),
+              onTap: () => openNamed(AppRoutes.resources),
             ),
             ActionTile(
-              title:
-              '${hub.requests.length} support requests',
-              subtitle:
-              'Review your local request history',
+              title: 'Cloud-backed support requests',
+              subtitle: 'Retrieve your requests from the server',
               icon: Icons.inbox_outlined,
-              onTap: () =>
-                  openNamed(AppRoutes.requests),
+              onTap: () => openNamed(AppRoutes.requests),
             ),
           ]),
           const SizedBox(height: 24),
@@ -2245,26 +2180,25 @@ class ResourcesScreen extends StatefulWidget {
   const ResourcesScreen({super.key});
 
   @override
-  State<ResourcesScreen> createState() =>
-      _ResourcesScreenState();
+  State<ResourcesScreen> createState() => _ResourcesScreenState();
 }
 
 class _ResourcesScreenState extends State<ResourcesScreen> {
   String query = '';
   bool reading = false;
 
-  Future<void> read(Map<String, String> r) async {
+  Future<void> read(Map<String, String> resource) async {
     if (reading) return;
     reading = true;
 
-    final saved = hub.bookmarks.contains(r['title']);
+    final saved = hub.bookmarks.contains(resource['title']);
 
     final result = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text(r['title']!),
+        title: Text(resource['title']!),
         content: SingleChildScrollView(
-          child: Text(r['body']!),
+          child: Text(resource['body']!),
         ),
         actions: [
           TextButton(
@@ -2282,13 +2216,12 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
     );
 
     reading = false;
-
     if (!mounted || result != true) return;
 
     if (saved) {
-      hub.bookmarks.remove(r['title']);
+      hub.bookmarks.remove(resource['title']);
     } else {
-      hub.bookmarks.add(r['title']!);
+      hub.bookmarks.add(resource['title']!);
     }
 
     await hub.save();
@@ -2304,15 +2237,14 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: hub,
-    builder: (_, __) => CampusShell(
+    builder: (_, _) => CampusShell(
       title: 'Resource library',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           pageTitle(
             'Useful, when you need it.',
-            'Search student guides and keep '
-                'the ones that matter.',
+            'Search student guides and keep the ones that matter.',
           ),
           TextField(
             onChanged: (v) =>
@@ -2329,9 +2261,7 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
                 .contains(query),
           ))
             const Panel(
-              child: Text(
-                'No results. Try another keyword.',
-              ),
+              child: Text('No results. Try another keyword.'),
             ),
           responsiveGrid([
             for (final r in campusResources)
@@ -2353,6 +2283,7 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
   );
 }
 
+// MY REQUESTS: server records are fetched with an owner-restricted query.
 class RequestsScreen extends StatefulWidget {
   const RequestsScreen({super.key});
 
@@ -2362,93 +2293,210 @@ class RequestsScreen extends StatefulWidget {
 
 class _RequestsScreenState extends State<RequestsScreen>
     with RouteGuard<RequestsScreen> {
+  late Future<List<CloudRequest>> records = requestStore.listMine();
+  final lookup = TextEditingController();
+
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: hub,
-    builder: (_, __) => CampusShell(
-      title: 'My requests',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          pageTitle(
-            'Support, with a clear record.',
-            'Local demonstration requests. '
-                'Nothing is sent to university staff.',
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: FilledButton.icon(
-              onPressed: () =>
-                  openNamed(AppRoutes.helpdesk),
+  void dispose() {
+    lookup.dispose();
+    super.dispose();
+  }
+
+  Future<void> createRequest() async {
+    await openNamed(AppRoutes.helpdesk);
+    if (mounted) {
+      setState(() => records = requestStore.listMine());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => CampusShell(
+    title: 'My requests',
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        pageTitle(
+          'Support, with a clear record.',
+          'Your server-confirmed requests from Cloud Firestore. '
+              'Educational prototype; requests are not sent to IITU staff.',
+        ),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            FilledButton.icon(
+              onPressed: createRequest,
               icon: const Icon(Icons.add),
               label: const Text('Create a request'),
             ),
-          ),
-          const SizedBox(height: 24),
-          if (hub.requests.isEmpty)
-            const Panel(
-              child: Text(
-                'No requests yet. Create a campus request '
-                    'to see its summary here.',
-              ),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() => records = requestStore.listMine());
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh from server'),
             ),
-          for (final r in hub.requests)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Panel(
-                child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      r['Reference'] ?? '',
-                      style: const TextStyle(
-                        color: red,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      r['Request subject'] ?? '',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const Divider(height: 28),
-                    for (final e in r.entries)
-                      if (e.key != 'Reference' &&
-                          e.key != 'Request subject')
-                        Padding(
-                          padding:
-                          const EdgeInsets.only(
-                            bottom: 12,
-                          ),
-                          child: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                e.key,
-                                style: const TextStyle(
-                                  fontWeight:
-                                  FontWeight.w600,
-                                ),
-                              ),
-                              SelectableText(
-                                e.value.isEmpty
-                                    ? 'Not provided'
-                                    : e.value,
-                              ),
-                            ],
-                          ),
-                        ),
-                  ],
+          ],
+        ),
+        const SizedBox(height: 24),
+        const RequestProgressPanel(),
+        const SizedBox(height: 24),
+        Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Retrieve a retained reference',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: lookup,
+                decoration: const InputDecoration(
+                  labelText: 'Firestore document ID',
+                  prefixIcon: Icon(Icons.receipt_long_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    final id = lookup.text.trim();
+
+                    if (id.isEmpty || id.contains('/')) {
+                      notify(context, 'Enter a valid document ID.');
+                      return;
+                    }
+
+                    openDirect<void>(
+                      MaterialPageRoute<void>(
+                        builder: (_) => CloudRequestSummaryScreen(
+                          requestId: id,
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.cloud_download_outlined),
+                  label: const Text('Retrieve from server'),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        FutureBuilder<List<CloudRequest>>(
+          future: records,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Panel(
+                child: Column(
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Loading your records from the server…'),
+                  ],
+                ),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return Panel(
+                child: Text(
+                  'Could not load the server list. '
+                      '${firebaseMessage(snapshot.error!)}',
+                ),
+              );
+            }
+
+            final requests = snapshot.data ?? [];
+
+            if (requests.isEmpty) {
+              return const Panel(
+                child: Text(
+                  'No server-confirmed requests yet. '
+                      'Create a campus request to see it here.',
+                ),
+              );
+            }
+
+            return Column(
+              children: [
+                for (final request in requests)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Panel(
+                      child: Column(
+                        crossAxisAlignment:
+                        CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            request.data['subject'] as String? ??
+                                '',
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SelectableText(
+                            'Reference: ${request.id}',
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '${request.data['serviceCategory']} · '
+                                '${request.data['status']}',
+                          ),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: () => openDirect<void>(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      CloudRequestSummaryScreen(
+                                        requestId: request.id,
+                                      ),
+                                ),
+                              ),
+                              icon: const Icon(
+                                Icons.receipt_long_outlined,
+                              ),
+                              label: const Text(
+                                'View server summary',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+        if (hub.requests.isNotEmpty) ...[
+          const SizedBox(height: 24),
+          ExpansionTile(
+            title: const Text('Previous browser-only demo records'),
+            subtitle: const Text(
+              'Legacy archive — these were not submitted to Firestore',
             ),
+            children: [
+              for (final r in hub.requests)
+                ListTile(
+                  title: Text(
+                    r['Request subject'] ?? 'Previous local request',
+                  ),
+                  subtitle: Text(r['Reference'] ?? ''),
+                ),
+            ],
+          ),
         ],
-      ),
+      ],
     ),
   );
 }
@@ -2457,8 +2505,7 @@ class UnknownRouteScreen extends StatelessWidget {
   const UnknownRouteScreen({
     super.key,
     required this.routeName,
-    this.reason =
-    'This page is not registered in Student Hub.',
+    this.reason = 'This page is not registered in Student Hub.',
   });
 
   final String routeName;
@@ -2472,12 +2519,10 @@ class UnknownRouteScreen extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: Center(
           child: ConstrainedBox(
-            constraints:
-            const BoxConstraints(maxWidth: 650),
+            constraints: const BoxConstraints(maxWidth: 650),
             child: Panel(
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
                     '404',
@@ -2487,13 +2532,8 @@ class UnknownRouteScreen extends StatelessWidget {
                       color: red,
                     ),
                   ),
-                  pageTitle(
-                    'A wrong turn, not a dead end.',
-                    reason,
-                  ),
-                  SelectableText(
-                    'Requested route: $routeName',
-                  ),
+                  pageTitle('A wrong turn, not a dead end.', reason),
+                  SelectableText('Requested route: $routeName'),
                   const SizedBox(height: 24),
                   FilledButton.icon(
                     onPressed: () {
@@ -2529,15 +2569,9 @@ class CampusPattern extends CustomPainter {
 
     for (var i = 0; i < 8; i++) {
       final x = size.width * .72 + i * 34;
-
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromLTWH(
-            x,
-            -40 + i * 24,
-            150,
-            size.height + 80,
-          ),
+          Rect.fromLTWH(x, -40 + i * 24, 150, size.height + 80),
           const Radius.circular(32),
         ),
         p,
@@ -2552,27 +2586,20 @@ class CampusPattern extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) =>
-      false;
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class ReminderDialog extends StatefulWidget {
-  const ReminderDialog({
-    super.key,
-    this.initial = '',
-  });
+  const ReminderDialog({super.key, this.initial = ''});
 
   final String initial;
 
   @override
-  State<ReminderDialog> createState() =>
-      _ReminderDialogState();
+  State<ReminderDialog> createState() => _ReminderDialogState();
 }
 
 class _ReminderDialogState extends State<ReminderDialog> {
-  late final controller =
-  TextEditingController(text: widget.initial);
-
+  late final controller = TextEditingController(text: widget.initial);
   final key = GlobalKey<FormState>();
 
   @override
@@ -2605,8 +2632,7 @@ class _ReminderDialogState extends State<ReminderDialog> {
               : null,
           decoration: const InputDecoration(
             labelText: 'Reminder',
-            hintText:
-            'Finish my lab report before Tuesday',
+            hintText: 'Finish my lab report before Tuesday',
           ),
         ),
       ),
@@ -2625,21 +2651,16 @@ class _ReminderDialogState extends State<ReminderDialog> {
 }
 
 class ProfileDialog extends StatefulWidget {
-  const ProfileDialog({
-    super.key,
-    required this.data,
-  });
+  const ProfileDialog({super.key, required this.data});
 
   final Map<String, String> data;
 
   @override
-  State<ProfileDialog> createState() =>
-      _ProfileDialogState();
+  State<ProfileDialog> createState() => _ProfileDialogState();
 }
 
 class _ProfileDialogState extends State<ProfileDialog> {
   final key = GlobalKey<FormState>();
-
   late final inputs = {
     for (final e in widget.data.entries)
       e.key: TextEditingController(text: e.value),
@@ -2666,8 +2687,7 @@ class _ProfileDialogState extends State<ProfileDialog> {
             children: [
               for (final e in inputs.entries)
                 Padding(
-                  padding:
-                  const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.only(bottom: 16),
                   child: TextFormField(
                     controller: e.value,
                     keyboardType: e.key == 'email'
@@ -2734,24 +2754,16 @@ class _ProfileDialogState extends State<ProfileDialog> {
   );
 }
 
-// Previous Form assignment remains available as a separate route.
+// CAMPUS FORM: existing appearance, now backed by Cloud Firestore.
 class CampusRequestPage extends StatefulWidget {
-  const CampusRequestPage({
-    super.key,
-    required this.student,
-    required this.onRecord,
-  });
-
-  final Map<String, String> student;
-  final Future<void> Function(Map<String, String>) onRecord;
+  const CampusRequestPage({super.key});
 
   @override
-  State<CampusRequestPage> createState() =>
-      _CampusRequestPageState();
+  State<CampusRequestPage> createState() => _CampusRequestPageState();
 }
 
 class _CampusRequestPageState extends State<CampusRequestPage> {
-  // One key coordinates form validation, saving and resetting.
+  // A single FormState key coordinates validate, save and reset.
   final formKey = GlobalKey<FormState>();
 
   final inputs = {
@@ -2770,9 +2782,13 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
   final saved = <String, String>{};
 
   String? category;
-  int generation = 0;
+  String? urgency;
+  String? contactMethod;
+  DateTime? preferredDate;
+  bool consent = false;
   bool busy = false;
   bool submitted = false;
+  int generation = 0;
 
   static const services = [
     'IT support',
@@ -2783,10 +2799,43 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
     'Academic support',
   ];
 
-  DateTime get today {
-    final n = DateTime.now();
-    return DateTime(n.year, n.month, n.day);
+  @override
+  void initState() {
+    super.initState();
+
+    // Restore a retained request together with its original reference.
+    final p = requestStore.payload;
+    if (p == null) return;
+
+    const mapping = {
+      'name': 'studentName',
+      'id': 'studentId',
+      'email': 'email',
+      'phone': 'phone',
+      'subject': 'subject',
+      'details': 'description',
+      'room': 'location',
+    };
+
+    for (final e in mapping.entries) {
+      inputs[e.key]!.text = p[e.value]?.toString() ?? '';
+    }
+
+    category = p['serviceCategory'] as String?;
+    urgency = p['urgency'] as String?;
+    contactMethod = p['preferredContact'] as String?;
+    consent = p['declaration'] == true;
+
+    if (p['preferredDate'] is Timestamp) {
+      final day = (p['preferredDate'] as Timestamp)
+          .toDate()
+          .toUtc()
+          .add(campusOffset);
+      preferredDate = DateTime(day.year, day.month, day.day);
+    }
   }
+
+  DateTime get today => campusToday();
 
   String dateLabel(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/'
@@ -2802,18 +2851,16 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
     super.dispose();
   }
 
-  // Specific validation errors preserve other entered information.
-  String? validate(String key, String? raw) {
-    final v = (raw ?? '').trim();
+  // Specific client validators match the customized Firestore schema.
+  String? validate(String key, String? value) {
+    final v = (value ?? '').trim();
 
     switch (key) {
       case 'name':
-        return v
-            .split(RegExp(r'\s+'))
-            .where((s) => s.isNotEmpty)
-            .length <
-            2
-            ? 'Enter your first and last name.'
+        return v.length < 3 ||
+            v.length > 100 ||
+            v.split(RegExp(r'\s+')).length < 2
+            ? 'Enter a first and last name, 3–100 characters.'
             : null;
 
       case 'id':
@@ -2822,21 +2869,26 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
             : null;
 
       case 'email':
-        return !RegExp(
-          r'^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$',
-        ).hasMatch(v)
-            ? 'Enter an email with @ and a valid domain.'
+        return v.length > 150 ||
+            !RegExp(
+              r'^[A-Za-z0-9._%+-]+@iitu\.edu\.kz$',
+            ).hasMatch(v.toLowerCase())
+            ? 'Use a campus email such as mira.demo@iitu.edu.kz.'
             : null;
 
       case 'phone':
-        return v.isNotEmpty &&
-            !RegExp(r'^\+?[0-9]{7,15}$').hasMatch(v)
+        if (v.isEmpty) {
+          return contactMethod == 'Phone'
+              ? 'A phone number is required for Phone contact.'
+              : null;
+        }
+        return !RegExp(r'^\+?[0-9]{7,15}$').hasMatch(v)
             ? 'Use 7–15 digits and an optional leading +.'
             : null;
 
       case 'subject':
-        return v.length < 5
-            ? 'Describe the topic in at least 5 characters.'
+        return v.length < 5 || v.length > 100
+            ? 'Use 5–100 characters for the subject.'
             : null;
 
       case 'details':
@@ -2845,8 +2897,8 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
             : null;
 
       case 'room':
-        return v.isEmpty
-            ? 'Enter the room or campus location.'
+        return v.isEmpty || v.length > 100
+            ? 'Enter a campus location, up to 100 characters.'
             : null;
     }
 
@@ -2883,57 +2935,67 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
       ) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 20),
-        child: Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: bg,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      number,
-                      style: const TextStyle(
-                        color: red,
-                        fontWeight: FontWeight.w700,
+        child: AbsorbPointer(
+          // Editable controls freeze while the retained request is pending.
+          absorbing: number != '04' &&
+              (requestStore.locked || requestStore.reference != null),
+          child: Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: bg,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        number,
+                        style: const TextStyle(
+                          color: red,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                for (final child in children) ...[
+                  child,
+                  const SizedBox(height: 16),
                 ],
-              ),
-              const SizedBox(height: 24),
-              for (final child in children) ...[
-                child,
-                const SizedBox(height: 16),
               ],
-            ],
+            ),
           ),
         ),
       );
 
-  Widget choices(
-      String label,
-      List<String> options,
-      ) =>
+  Widget choices(String label, List<String> options) =>
       FormField<String>(
+        initialValue: label == 'Urgency' ? urgency : contactMethod,
         validator: (v) => v == null ? 'Choose $label.' : null,
-        onSaved: (v) => saved[label] = v!,
+        onSaved: (v) {
+          saved[label] = v!;
+          if (label == 'Urgency') {
+            urgency = v;
+          } else {
+            contactMethod = v;
+          }
+        },
         builder: (f) => InputDecorator(
           decoration: InputDecoration(
             labelText: label,
@@ -2947,7 +3009,16 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                 ChoiceChip(
                   label: Text(option),
                   selected: f.value == option,
-                  onSelected: (_) => f.didChange(option),
+                  onSelected: (_) {
+                    f.didChange(option);
+                    setState(() {
+                      if (label == 'Urgency') {
+                        urgency = option;
+                      } else {
+                        contactMethod = option;
+                      }
+                    });
+                  },
                 ),
             ],
           ),
@@ -2955,18 +3026,20 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
       );
 
   Widget dateField() => FormField<DateTime>(
+    initialValue: preferredDate,
     validator: (d) => d == null
         ? 'Choose a preferred response date.'
         : d.isBefore(today)
         ? 'Choose today or a future date.'
         : null,
-    onSaved: (d) =>
-    saved['Preferred date'] = dateLabel(d!),
+    onSaved: (d) {
+      preferredDate = d;
+      saved['Preferred date'] = dateLabel(d!);
+    },
     builder: (f) => InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () async {
         final first = today;
-
         final result = await showDatePicker(
           context: context,
           firstDate: first,
@@ -2975,8 +3048,7 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
             first.month,
             first.day,
           ),
-          initialDate:
-          f.value == null || f.value!.isBefore(first)
+          initialDate: f.value == null || f.value!.isBefore(first)
               ? first
               : f.value!,
           helpText: 'Preferred response date',
@@ -2984,6 +3056,7 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
 
         if (mounted && result != null) {
           f.didChange(result);
+          preferredDate = result;
         }
       },
       child: InputDecorator(
@@ -2991,39 +3064,42 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
           labelText: 'Preferred response date',
           helperText:
           'A preference, not a confirmed appointment.',
-          prefixIcon:
-          const Icon(Icons.calendar_today_outlined),
+          prefixIcon: const Icon(Icons.calendar_today_outlined),
           errorText: f.errorText,
         ),
         child: Text(
-          f.value == null
-              ? 'Select a date'
-              : dateLabel(f.value!),
+          f.value == null ? 'Select a date' : dateLabel(f.value!),
         ),
       ),
     ),
   );
 
   Widget declaration() => FormField<bool>(
-    initialValue: false,
+    initialValue: consent,
     validator: (v) => v == true
         ? null
         : 'Confirm your information before submitting.',
-    onSaved: (_) => saved['Declaration'] = 'Confirmed',
+    onSaved: (v) {
+      consent = v == true;
+      saved['Declaration'] = 'Confirmed';
+    },
     builder: (f) => Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        CheckboxListTile(
-          contentPadding: EdgeInsets.zero,
-          controlAffinity:
-          ListTileControlAffinity.leading,
-          value: f.value ?? false,
-          onChanged: (v) => f.didChange(v ?? false),
-          title: const Text(
-            'I confirm that my details and request are correct.',
-          ),
-          subtitle: const Text(
-            'I agree to be contacted about this request.',
+        AbsorbPointer(
+          absorbing:
+          requestStore.locked || requestStore.reference != null,
+          child: CheckboxListTile(
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            value: f.value ?? false,
+            onChanged: (v) => f.didChange(v ?? false),
+            title: const Text(
+              'I confirm that my details and request are correct.',
+            ),
+            subtitle: const Text(
+              'I agree to be contacted about this request.',
+            ),
           ),
         ),
         if (f.hasError)
@@ -3037,54 +3113,75 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
     ),
   );
 
-  // Validation must succeed before onSaved callbacks are invoked.
+  // Only valid input runs onSaved and proceeds to the database.
   Future<void> submit() async {
-    if (busy || submitted) return;
+    if (busy ||
+        requestStore.operating ||
+        requestStore.reference != null) {
+      return;
+    }
 
     FocusScope.of(context).unfocus();
 
-    if (!formKey.currentState!.validate()) {
-      message(
-        'Check the highlighted fields. '
-            'Your entries have been kept.',
-      );
+    if (!(formKey.currentState?.validate() ?? false)) {
+      message('Check the highlighted fields. Your entries have been kept.');
       return;
     }
 
     saved.clear();
     formKey.currentState!.save();
 
-    final summary = <String, String>{
-      'Reference':
-      'IITU-${DateTime.now().microsecondsSinceEpoch}',
-      ...saved,
+    final payload = <String, dynamic>{
+      'studentName': saved['Full name']!.replaceAll(
+        RegExp(r'\s+'),
+        ' ',
+      ),
+      'studentId': saved['Student ID']!,
+      'email': saved['Campus email']!.toLowerCase(),
+      'phone': saved['Phone number']!,
+      'serviceCategory': category!,
+      'subject': saved['Request subject']!,
+      'description': saved['Request description']!,
+      'location': category == 'Facilities'
+          ? saved['Room / campus location']!
+          : '',
+      'urgency': urgency!,
+      'preferredContact': contactMethod!,
+      'preferredDate': campusTimestamp(preferredDate!),
+      'declaration': consent,
+      'status': 'submitted',
     };
 
     setState(() => busy = true);
-
-    try {
-      await widget.onRecord(summary);
-    } catch (_) {
-      if (mounted) {
-        setState(() => busy = false);
-        message(
-          'Could not record the request. Please try again.',
-        );
-      }
-      return;
-    }
+    await requestStore.submit(payload);
 
     if (!mounted) return;
 
     setState(() {
       busy = false;
-      submitted = true;
+      submitted = requestStore.writeAcknowledged;
     });
+
+    if (!submitted) {
+      message(
+        requestStore.error ??
+            'Not yet confirmed. Keep the retained reference '
+                'and check the server.',
+      );
+      return;
+    }
+
+    message('Server confirmed. Reference: ${requestStore.reference}');
+
+    final summary = requestSummary(
+      requestStore.reference!,
+      requestStore.verified ?? requestStore.payload!,
+    );
 
     final another = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
-        title: const Text('Your demo request is recorded'),
+        title: const Text('Your request is saved in Firestore'),
         content: SizedBox(
           width: 520,
           child: SingleChildScrollView(
@@ -3093,38 +3190,32 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Icon(
-                  Icons.check_circle_outline,
+                  Icons.cloud_done_outlined,
                   color: Color(0xFF207348),
                   size: 40,
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Saved in your Student Hub on this browser. '
-                      'This request has not been sent to IITU.',
+                  'The database acknowledged this write. '
+                      'Teaching prototype; this request is not sent to IITU staff.',
                 ),
+                if (requestStore.error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(requestStore.error!),
+                ],
                 const Divider(height: 32),
-                for (final e in summary.entries)
-                  Padding(
-                    padding:
-                    const EdgeInsets.only(bottom: 12),
-                    child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          e.key,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        SelectableText(
-                          e.value.isEmpty
-                              ? 'Not provided'
-                              : e.value,
-                        ),
-                      ],
+                for (final e in summary.entries) ...[
+                  Text(
+                    e.key,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
+                  SelectableText(
+                    e.value.isEmpty ? 'Not provided' : e.value,
+                  ),
+                  const SizedBox(height: 12),
+                ],
               ],
             ),
           ),
@@ -3132,7 +3223,7 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: const Text('Keep summary'),
+            child: const Text('Keep reference'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(c, true),
@@ -3142,11 +3233,29 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
       ),
     );
 
-    if (mounted && another == true) reset();
+    if (mounted && another == true) await reset();
   }
 
-  // Full reset includes every non-text selection and error state.
-  void reset() {
+  // Reset clears local state; the confirmed Firestore document remains.
+  Future<void> reset() async {
+    if (busy || !requestStore.canReset) return;
+    setState(() => busy = true);
+
+    try {
+      await requestStore.startNew();
+    } catch (_) {
+      if (mounted) {
+        setState(() => busy = false);
+        message(
+          'Could not clear the local reference. '
+              'Copy the ID and try again.',
+        );
+      }
+      return;
+    }
+
+    if (!mounted) return;
+
     FocusScope.of(context).unfocus();
     formKey.currentState?.reset();
 
@@ -3156,79 +3265,80 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
 
     setState(() {
       category = null;
+      urgency = null;
+      contactMethod = null;
+      preferredDate = null;
+      consent = false;
+      busy = false;
       saved.clear();
       submitted = false;
       generation++;
     });
 
-    message('Form cleared. You can start a new request.');
+    message('Form cleared. Your saved server records are unchanged.');
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text(
-        'Campus helpdesk',
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: requestStore,
+    builder: (context, _) => Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Campus helpdesk',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
-    ),
-    body: SafeArea(
-      child: SingleChildScrollView(
-        keyboardDismissBehavior:
-        ScrollViewKeyboardDismissBehavior.onDrag,
-        padding: const EdgeInsets.all(18),
-        child: Center(
-          child: ConstrainedBox(
-            constraints:
-            const BoxConstraints(maxWidth: 850),
-            child: Column(
-              crossAxisAlignment:
-              CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 12),
-                const UniversityLogo(width: 207),
-                const SizedBox(height: 28),
-                const Text(
-                  'How can we help?',
-                  style: TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -1,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          keyboardDismissBehavior:
+          ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.all(18),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 850),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 12),
+                  const UniversityLogo(width: 207),
+                  const SizedBox(height: 28),
+                  const Text(
+                    'How can we help?',
+                    style: TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -1,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Choose a campus team, describe what you need '
-                      'and set your contact preferences.',
-                  style: TextStyle(color: muted),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Educational prototype. All fields required '
-                      'except phone. Requests stay in this browser.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: muted,
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Choose a campus team, describe what you need '
+                        'and set your contact preferences.',
+                    style: TextStyle(color: muted),
                   ),
-                ),
-                const SizedBox(height: 24),
-                Form(
-                  key: formKey,
-                  autovalidateMode:
-                  AutovalidateMode.onUserInteraction,
-                  child: Column(
-                    key: ValueKey(generation),
-                    children: [
-                      section(
-                        '01',
-                        'Student details',
-                        [
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Use fictional student data. Requests are saved '
+                        'in a teaching Firestore database. Phone is required '
+                        'only for Phone contact.',
+                    style: TextStyle(fontSize: 12, color: muted),
+                  ),
+                  const SizedBox(height: 24),
+                  RequestProgressPanel(onNew: reset),
+                  const SizedBox(height: 24),
+                  Form(
+                    key: formKey,
+                    autovalidateMode:
+                    AutovalidateMode.onUserInteraction,
+                    child: Column(
+                      key: ValueKey(generation),
+                      children: [
+                        section('01', 'Student details', [
                           Align(
-                            alignment:
-                            Alignment.centerLeft,
+                            alignment: Alignment.centerLeft,
                             child: TextButton.icon(
                               onPressed: busy || submitted
                                   ? null
@@ -3238,21 +3348,21 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                                   'id',
                                   'email',
                                 ]) {
-                                  inputs[k]!.text =
-                                      widget.student[k] ??
-                                          '';
+                                  inputs[k]!.text = const {
+                                    'name': 'Mira Sadykova',
+                                    'id': 'DEMO1234',
+                                    'email':
+                                    'mira.demo@iitu.edu.kz',
+                                  }[k]!;
                                 }
-
                                 message(
-                                  'Profile details added. '
+                                  'Fictional sample details added. '
                                       'Complete any missing fields.',
                                 );
                               },
-                              icon: const Icon(
-                                Icons.person_outline,
-                              ),
+                              icon: const Icon(Icons.person_outline),
                               label: const Text(
-                                'Use my profile details',
+                                'Use fictional sample details',
                               ),
                             ),
                           ),
@@ -3260,46 +3370,39 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                             'name',
                             'Full name',
                             Icons.person_outline,
-                            hint: 'Azhar Akhmetova',
+                            hint: 'Mira Sadykova',
                           ),
                           field(
                             'id',
                             'Student ID',
                             Icons.badge_outlined,
-                            hint: 'I26043015',
-                            helper:
-                            '6–12 letters or digits. '
-                                'Example: I26043015.',
+                            hint: 'DEMO1234',
+                            helper: '6–12 letters or digits. '
+                                'Example: DEMO1234.',
                           ),
                           field(
                             'email',
                             'Campus email',
                             Icons.mail_outline,
-                            hint: 'student@iitu.edu.kz',
-                            keyboard:
-                            TextInputType.emailAddress,
+                            hint: 'mira.demo@iitu.edu.kz',
+                            keyboard: TextInputType.emailAddress,
                           ),
                           field(
                             'phone',
-                            'Phone (optional)',
+                            'Phone number',
                             Icons.phone_outlined,
                             hint: '+77001234567',
                             keyboard: TextInputType.phone,
                           ),
-                        ],
-                      ),
-                      section(
-                        '02',
-                        'Request details',
-                        [
+                        ]),
+                        section('02', 'Request details', [
                           DropdownButtonFormField<String>(
+                            initialValue: category,
                             isExpanded: true,
-                            decoration:
-                            const InputDecoration(
+                            decoration: const InputDecoration(
                               labelText: 'Campus service',
-                              prefixIcon: Icon(
-                                Icons.apartment_outlined,
-                              ),
+                              prefixIcon:
+                              Icon(Icons.apartment_outlined),
                             ),
                             items: [
                               for (final s in services)
@@ -3309,32 +3412,31 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                                 ),
                             ],
                             validator: (v) => v == null
-                                ? 'Select the campus team '
-                                'that can help you.'
+                                ? 'Select the campus team that can help you.'
                                 : null,
                             onSaved: (v) =>
                             saved['Campus service'] = v!,
-                            onChanged: (v) => setState(() {
-                              category = v;
-                              inputs['room']!.clear();
-                            }),
+                            onChanged: (v) {
+                              setState(() {
+                                category = v;
+                                inputs['room']!.clear();
+                              });
+                            },
                           ),
 
-                          // Conditional field from the Form assignment.
+                          // Advanced option: conditional Facilities field.
                           if (category == 'Facilities')
                             field(
                               'room',
                               'Room / campus location',
                               Icons.location_on_outlined,
-                              hint:
-                              'Main building, room 204',
+                              hint: 'Main building, room 204',
                             ),
                           field(
                             'subject',
                             'Request subject',
                             Icons.title,
-                            hint:
-                            'Cannot connect to campus Wi-Fi',
+                            hint: 'Cannot connect to campus Wi-Fi',
                           ),
                           field(
                             'details',
@@ -3342,11 +3444,9 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                             Icons.edit_note,
                             hint:
                             'What happened, and what help do you need?',
-                            helper:
-                            '20–500 characters. '
+                            helper: '20–500 characters. '
                                 'Do not include passwords.',
-                            keyboard:
-                            TextInputType.multiline,
+                            keyboard: TextInputType.multiline,
                             lines: 5,
                             limit: 500,
                           ),
@@ -3354,30 +3454,19 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                             'Urgency',
                             ['Low', 'Normal', 'High'],
                           ),
-                        ],
-                      ),
-                      section(
-                        '03',
-                        'Contact preferences',
-                        [
+                        ]),
+                        section('03', 'Contact preferences', [
                           choices(
                             'Preferred contact',
-                            [
-                              'Campus email',
-                              'In-person consultation',
-                            ],
+                            ['Email', 'Phone'],
                           ),
                           dateField(),
-                        ],
-                      ),
-                      section(
-                        '04',
-                        'Review and confirm',
-                        [
+                        ]),
+                        section('04', 'Review and confirm', [
                           declaration(),
                           if (submitted)
                             const Text(
-                              'Recorded locally. Your summary '
+                              'Server confirmed. The saved document '
                                   'is available in My requests. '
                                   'Reset to start a new request.',
                               style: TextStyle(
@@ -3389,7 +3478,9 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                             runSpacing: 12,
                             children: [
                               FilledButton.icon(
-                                onPressed: busy || submitted
+                                onPressed: busy ||
+                                    requestStore.operating ||
+                                    requestStore.reference != null
                                     ? null
                                     : submit,
                                 icon: const Icon(
@@ -3398,28 +3489,27 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                                 ),
                                 label: Text(
                                   busy
-                                      ? 'Recording…'
+                                      ? 'Saving / pending sync…'
                                       : 'Submit request',
                                 ),
                               ),
                               OutlinedButton.icon(
-                                onPressed:
-                                busy ? null : reset,
-                                icon: const Icon(
-                                  Icons.restart_alt,
-                                ),
-                                label:
-                                const Text('Reset form'),
+                                onPressed: busy ||
+                                    !requestStore.canReset
+                                    ? null
+                                    : reset,
+                                icon: const Icon(Icons.restart_alt),
+                                label: const Text('Reset form'),
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ],
+                        ]),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 30),
-              ],
+                  const SizedBox(height: 30),
+                ],
+              ),
             ),
           ),
         ),
@@ -3428,6 +3518,7 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
   );
 }
 
+// Advanced option: a reusable field with consistent styling and focus flow.
 class CampusTextField extends StatelessWidget {
   const CampusTextField({
     super.key,
@@ -3458,14 +3549,14 @@ class CampusTextField extends StatelessWidget {
   Widget build(BuildContext context) => TextFormField(
     controller: controller,
     keyboardType: keyboard,
-    textInputAction: lines > 1
-        ? TextInputAction.newline
-        : TextInputAction.next,
+    textInputAction:
+    lines > 1 ? TextInputAction.newline : TextInputAction.next,
     onFieldSubmitted: lines == 1
         ? (_) => FocusScope.of(context).nextFocus()
         : null,
     minLines: lines,
     maxLines: lines,
+    // Advanced option: Flutter displays a live character counter.
     maxLength: limit,
     validator: validator,
     onSaved: onSaved,
@@ -3478,7 +3569,698 @@ class CampusTextField extends StatelessWidget {
   );
 }
 
-// Embedded official PNG logo. Keep this string unchanged.
+// Campus calendar dates use Almaty UTC+05, regardless of browser timezone.
+const campusOffset = Duration(hours: 5);
+
+DateTime campusToday() {
+  final n = DateTime.now().toUtc().add(campusOffset);
+  return DateTime(n.year, n.month, n.day);
+}
+
+Timestamp campusTimestamp(DateTime day) => Timestamp.fromDate(
+  DateTime.utc(day.year, day.month, day.day)
+      .subtract(campusOffset),
+);
+
+String campusDateText(Timestamp value) {
+  final d = value.toDate().toUtc().add(campusOffset);
+  return '${d.day.toString().padLeft(2, '0')}/'
+      '${d.month.toString().padLeft(2, '0')}/${d.year}';
+}
+
+String firebaseMessage(Object error) {
+  if (error is FirebaseException) {
+    switch (error.code) {
+      case 'permission-denied':
+        return 'Access denied. Check Anonymous sign-in and the published '
+            'Firestore rules. Your entries are kept.';
+      case 'operation-not-allowed':
+        return 'Enable Anonymous in Firebase Console → Authentication '
+            '→ Sign-in method.';
+      case 'unavailable':
+      case 'network-request-failed':
+        return 'The server is unavailable. Restore the connection, '
+            'then check the same request reference.';
+      case 'unauthenticated':
+        return 'The saved anonymous account is unavailable. Reopen the '
+            'app without clearing its browser data.';
+      default:
+        return 'Firebase error (${error.code}). Your entries are kept. '
+            'Check the project configuration and try again.';
+    }
+  }
+
+  return error is StateError
+      ? error.message.toString()
+      : 'Unable to complete the operation. Your entries have been kept.';
+}
+
+enum RequestPhase {
+  idle,
+  preparing,
+  pending,
+  recovering,
+  confirmed,
+  denied,
+  checkRequired,
+}
+
+class RequestMissing implements Exception {}
+
+class CloudRequest {
+  const CloudRequest(this.id, this.data);
+
+  final String id;
+  final Map<String, dynamic> data;
+}
+
+// Real requests have one retained auto-generated ID and immutable payload.
+class CampusRequestStore extends ChangeNotifier {
+  final preferences = SharedPreferencesAsync();
+
+  String? reference;
+  Map<String, dynamic>? payload;
+  Map<String, dynamic>? verified;
+
+  RequestPhase phase = RequestPhase.idle;
+  bool operating = false;
+  bool writeAcknowledged = false;
+
+  String? error;
+  String? persistenceWarning;
+  Timer? pendingTimer;
+
+  String get uid => FirebaseAuth.instance.currentUser?.uid ?? '';
+
+  String get storageKey =>
+      'iitu_firestore_v1_${Firebase.app().options.projectId}_$uid';
+
+  CollectionReference<Map<String, dynamic>> get collection =>
+      FirebaseFirestore.instance.collection('campusRequests');
+
+  bool get locked =>
+      operating ||
+          (reference != null && phase != RequestPhase.denied);
+
+  bool get canReset =>
+      !operating &&
+          (phase == RequestPhase.idle ||
+              phase == RequestPhase.confirmed ||
+              phase == RequestPhase.denied);
+
+  Future<void> initialize() async {
+    if (uid.isEmpty) {
+      throw StateError('Anonymous sign-in did not complete.');
+    }
+
+    final raw = await preferences.getString(storageKey);
+    if (raw == null) return;
+
+    try {
+      final data = Map<String, dynamic>.from(
+        jsonDecode(raw) as Map,
+      );
+
+      reference = data['reference'] as String?;
+
+      final p = data['payload'];
+      if (p is Map) {
+        payload = Map<String, dynamic>.from(p);
+        payload!['preferredDate'] =
+            Timestamp.fromMillisecondsSinceEpoch(
+              (payload!['preferredDate'] as num).toInt(),
+            );
+      }
+
+      writeAcknowledged = data['acknowledged'] == true;
+
+      if (reference != null) {
+        phase = RequestPhase.checkRequired;
+
+        // Restart recovery performs a server read of the retained ID.
+        unawaited(reconcile());
+      }
+    } catch (_) {
+      error = 'The retained request could not be restored. '
+          'Check My requests before making another submission.';
+      phase = RequestPhase.checkRequired;
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> remember() async {
+    final serializable = payload == null
+        ? null
+        : Map<String, dynamic>.from(payload!);
+
+    if (serializable != null) {
+      serializable['preferredDate'] =
+          (payload!['preferredDate'] as Timestamp)
+              .millisecondsSinceEpoch;
+    }
+
+    await preferences.setString(
+      storageKey,
+      jsonEncode({
+        'reference': reference,
+        'payload': serializable,
+        'acknowledged': writeAcknowledged,
+      }),
+    );
+  }
+
+  Future<void> rememberAfterConfirmation() async {
+    try {
+      await remember();
+    } catch (_) {
+      persistenceWarning =
+      'The server saved this request, but this browser could not '
+          'retain its reference. Copy the ID before closing.';
+    }
+  }
+
+  Future<void> submit(Map<String, dynamic> fields) async {
+    if (operating || reference != null) return;
+
+    operating = true;
+    phase = RequestPhase.preparing;
+    error = null;
+    verified = null;
+    notifyListeners();
+
+    try {
+      if (uid.isEmpty) {
+        throw StateError('Sign-in was not completed. Reopen the app.');
+      }
+
+      reference = collection.doc().id;
+      payload = {'ownerUid': uid, ...fields};
+
+      // Persist ID and data BEFORE the first network write.
+      await remember();
+      await writeRetained();
+    } catch (e) {
+      if (phase == RequestPhase.preparing) {
+        reference = null;
+        payload = null;
+        phase = RequestPhase.idle;
+        error = 'Could not retain a recovery reference. '
+            'No request was sent. ${firebaseMessage(e)}';
+      } else {
+        error = firebaseMessage(e);
+        phase = RequestPhase.checkRequired;
+      }
+    } finally {
+      operating = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> writeRetained() async {
+    final ref = collection.doc(reference!);
+
+    phase = RequestPhase.pending;
+    error = null;
+    notifyListeners();
+
+    pendingTimer?.cancel();
+    pendingTimer = Timer(const Duration(seconds: 8), () {
+      if (phase == RequestPhase.pending) {
+        error = 'Pending sync. If you are offline, reconnect and keep '
+            'this page open. The original reference is retained.';
+        notifyListeners();
+      }
+    });
+
+    try {
+      // No timeout on writes: an offline write may still be queued.
+      await ref.set({
+        ...payload!,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // Success is announced only after backend acknowledgement.
+      writeAcknowledged = true;
+      phase = RequestPhase.confirmed;
+      error = null;
+      await rememberAfterConfirmation();
+      notifyListeners();
+
+      // Verification failure is separate from a successful write.
+      try {
+        verified = await read(reference!);
+      } catch (e) {
+        error = 'Saved on the server. Summary verification failed: '
+            '${firebaseMessage(e)}';
+      }
+    } on FirebaseException catch (e) {
+      if (e.code == 'permission-denied') {
+        // A resumed set may be denied because its original create succeeded.
+        try {
+          verified = await read(reference!);
+          writeAcknowledged = true;
+          phase = RequestPhase.confirmed;
+          error = null;
+          await rememberAfterConfirmation();
+        } on RequestMissing {
+          phase = RequestPhase.denied;
+          error = firebaseMessage(e);
+        } on FirebaseException catch (readError) {
+          phase = readError.code == 'permission-denied'
+              ? RequestPhase.denied
+              : RequestPhase.checkRequired;
+          error = firebaseMessage(e);
+        } catch (readError) {
+          phase = RequestPhase.checkRequired;
+          error = firebaseMessage(readError);
+        }
+      } else {
+        phase = RequestPhase.checkRequired;
+        error = firebaseMessage(e);
+      }
+    } finally {
+      pendingTimer?.cancel();
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, dynamic>> read(String id) async {
+    final result = await collection
+        .doc(id)
+        .get(const GetOptions(source: Source.server))
+        .timeout(const Duration(seconds: 20));
+
+    if (!result.exists || result.data() == null) {
+      throw RequestMissing();
+    }
+
+    final data = result.data()!;
+
+    if (data['ownerUid'] != uid) {
+      throw StateError('This record belongs to a different account.');
+    }
+
+    if (data['createdAt'] is! Timestamp ||
+        result.metadata.hasPendingWrites) {
+      throw StateError(
+        'The server has not yet confirmed this record. '
+            'Keep the original request reference.',
+      );
+    }
+
+    return data;
+  }
+
+  Future<void> reconcile() async {
+    if (operating || reference == null) return;
+
+    operating = true;
+    phase = RequestPhase.recovering;
+    error = null;
+    notifyListeners();
+
+    try {
+      verified = await read(reference!);
+      writeAcknowledged = true;
+      phase = RequestPhase.confirmed;
+      await rememberAfterConfirmation();
+    } catch (e) {
+      phase = writeAcknowledged
+          ? RequestPhase.confirmed
+          : RequestPhase.checkRequired;
+
+      error = writeAcknowledged
+          ? 'The write was acknowledged. Server retrieval could not '
+          'complete: ${firebaseMessage(e)}'
+          : 'The original reference is retained. ${firebaseMessage(e)}';
+    } finally {
+      operating = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> retrySameReference() async {
+    if (operating ||
+        reference == null ||
+        payload == null ||
+        writeAcknowledged) {
+      return;
+    }
+
+    operating = true;
+    phase = RequestPhase.recovering;
+    error = null;
+    notifyListeners();
+
+    try {
+      // Read first: a previous attempt may already have reached the server.
+      try {
+        verified = await read(reference!);
+        writeAcknowledged = true;
+        phase = RequestPhase.confirmed;
+        await rememberAfterConfirmation();
+        return;
+      } on RequestMissing {
+        // Missing record: reuse the retained reference.
+      } on FirebaseException catch (e) {
+        // Owner-only rules can deny a read of a nonexistent document.
+        // Reusing the same ID cannot create a second document.
+        if (e.code != 'permission-denied') rethrow;
+      }
+
+      await writeRetained();
+    } catch (e) {
+      phase = RequestPhase.checkRequired;
+      error = firebaseMessage(e);
+    } finally {
+      operating = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> startNew() async {
+    if (!canReset) return;
+
+    // Clear recovery metadata; never update/delete saved Firestore records.
+    await preferences.remove(storageKey);
+
+    reference = null;
+    payload = null;
+    verified = null;
+    error = null;
+    persistenceWarning = null;
+    writeAcknowledged = false;
+    phase = RequestPhase.idle;
+
+    notifyListeners();
+  }
+
+  Future<List<CloudRequest>> listMine() async {
+    // Rules do not filter unrestricted queries: constrain by owner UID.
+    final snapshot = await collection
+        .where('ownerUid', isEqualTo: uid)
+        .get(const GetOptions(source: Source.server))
+        .timeout(const Duration(seconds: 20));
+
+    final records = snapshot.docs
+        .where(
+          (d) =>
+      !d.metadata.hasPendingWrites &&
+          d.data()['createdAt'] is Timestamp,
+    )
+        .map((d) => CloudRequest(d.id, d.data()))
+        .toList();
+
+    // Sort locally so this query does not need a composite ordering index.
+    records.sort(
+          (a, b) => (b.data['createdAt'] as Timestamp)
+          .compareTo(a.data['createdAt'] as Timestamp),
+    );
+
+    return records;
+  }
+}
+
+Map<String, String> requestSummary(
+    String id,
+    Map<String, dynamic> data,
+    ) =>
+    {
+      'Firestore document ID': id,
+      'Student name': '${data['studentName'] ?? ''}',
+      'Student ID': '${data['studentId'] ?? ''}',
+      'Campus email': '${data['email'] ?? ''}',
+      'Phone': '${data['phone'] ?? ''}',
+      'Campus service': '${data['serviceCategory'] ?? ''}',
+      'Subject': '${data['subject'] ?? ''}',
+      'Description': '${data['description'] ?? ''}',
+      if ((data['location'] ?? '').toString().isNotEmpty)
+        'Campus location': '${data['location']}',
+      'Urgency': '${data['urgency'] ?? ''}',
+      'Preferred contact': '${data['preferredContact'] ?? ''}',
+      'Preferred date (Almaty)': data['preferredDate'] is Timestamp
+          ? campusDateText(data['preferredDate'] as Timestamp)
+          : 'Not available',
+      'Declaration':
+      data['declaration'] == true ? 'Confirmed' : 'Not confirmed',
+      'Status': '${data['status'] ?? ''}',
+      'Owner UID': '${data['ownerUid'] ?? ''}',
+      'Created at (server, Almaty)': data['createdAt'] is Timestamp
+          ? (data['createdAt'] as Timestamp)
+          .toDate()
+          .toUtc()
+          .add(campusOffset)
+          .toIso8601String()
+          .replaceAll('Z', ' +05:00')
+          : 'Server timestamp not yet retrieved',
+    };
+
+class RequestProgressPanel extends StatefulWidget {
+  const RequestProgressPanel({super.key, this.onNew});
+
+  final VoidCallback? onNew;
+
+  @override
+  State<RequestProgressPanel> createState() =>
+      _RequestProgressPanelState();
+}
+
+class _RequestProgressPanelState extends State<RequestProgressPanel>
+    with RouteGuard<RequestProgressPanel> {
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: requestStore,
+    builder: (context, _) {
+      final store = requestStore;
+      final confirmed = store.phase == RequestPhase.confirmed;
+
+      final titles = {
+        RequestPhase.idle: 'Ready for a new campus request',
+        RequestPhase.preparing: 'Preparing a recovery reference…',
+        RequestPhase.pending:
+        'Saving / pending sync — waiting for the server',
+        RequestPhase.recovering:
+        'Checking the retained reference on the server…',
+        RequestPhase.confirmed: 'Request saved — server confirmed',
+        RequestPhase.denied:
+        'Write rejected — your entries are kept',
+        RequestPhase.checkRequired:
+        'Check the retained reference before submitting again',
+      };
+
+      return Panel(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  confirmed
+                      ? Icons.cloud_done_outlined
+                      : Icons.cloud_upload_outlined,
+                  color:
+                  confirmed ? const Color(0xFF207348) : red,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    titles[store.phase]!,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (store.operating) ...[
+              const SizedBox(height: 16),
+              const LinearProgressIndicator(),
+            ],
+            if (store.reference != null) ...[
+              const SizedBox(height: 12),
+              SelectableText('Reference: ${store.reference}'),
+            ],
+            if (store.error != null) ...[
+              const SizedBox(height: 12),
+              Text(store.error!),
+            ],
+            if (store.persistenceWarning != null) ...[
+              const SizedBox(height: 12),
+              Text(store.persistenceWarning!),
+            ],
+            if (store.reference != null) ...[
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed:
+                    store.operating ? null : store.reconcile,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Check server'),
+                  ),
+                  if (!confirmed)
+                    OutlinedButton.icon(
+                      onPressed: store.operating
+                          ? null
+                          : store.retrySameReference,
+                      icon: const Icon(Icons.sync),
+                      label: const Text('Retry same reference'),
+                    ),
+                  if (confirmed)
+                    FilledButton.icon(
+                      onPressed: () => openDirect<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              CloudRequestSummaryScreen(
+                                requestId: store.reference!,
+                              ),
+                        ),
+                      ),
+                      icon: const Icon(
+                        Icons.receipt_long_outlined,
+                      ),
+                      label: const Text('View server summary'),
+                    ),
+                  if (store.canReset && widget.onNew != null)
+                    TextButton(
+                      onPressed: widget.onNew,
+                      child: const Text('Start a new request'),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      );
+    },
+  );
+}
+
+// This summary always loads the same document directly from the server.
+class CloudRequestSummaryScreen extends StatefulWidget {
+  const CloudRequestSummaryScreen({
+    super.key,
+    required this.requestId,
+  });
+
+  final String requestId;
+
+  @override
+  State<CloudRequestSummaryScreen> createState() =>
+      _CloudRequestSummaryScreenState();
+}
+
+class _CloudRequestSummaryScreenState
+    extends State<CloudRequestSummaryScreen> {
+  late Future<Map<String, dynamic>> result =
+  requestStore.read(widget.requestId);
+
+  @override
+  Widget build(BuildContext context) => CampusShell(
+    title: 'Saved request',
+    child: FutureBuilder<Map<String, dynamic>>(
+      future: result,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Panel(
+            child: Column(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Retrieving this reference from the server…'),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Server retrieval could not complete',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SelectableText(widget.requestId),
+                const SizedBox(height: 12),
+                Text(
+                  snapshot.error is RequestMissing
+                      ? 'This document was not found. Check the '
+                      'reference. No new request has been created.'
+                      : firebaseMessage(snapshot.error!),
+                ),
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    setState(
+                          () => result =
+                          requestStore.read(widget.requestId),
+                    );
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry retrieval'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final summary = requestSummary(
+          widget.requestId,
+          snapshot.data!,
+        );
+
+        return Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(
+                Icons.verified_outlined,
+                color: Color(0xFF207348),
+                size: 40,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Retrieved from Cloud Firestore',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Text(
+                'Teaching prototype. This request is not '
+                    'forwarded to IITU staff.',
+              ),
+              const Divider(height: 32),
+              for (final e in summary.entries) ...[
+                Text(
+                  e.key,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SelectableText(
+                  e.value.isEmpty ? 'Not provided' : e.value,
+                ),
+                const SizedBox(height: 16),
+              ],
+            ],
+          ),
+        );
+      },
+    ),
+  );
+}
+
+// Official embedded PNG logo. This is image data, not a random identifier.
 final Uint8List logoBytes = base64Decode(logoBase64);
 
-const String logoBase64 = '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';
+const String logoBase64 =
+    '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';
