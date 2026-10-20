@@ -216,7 +216,6 @@ class IituApp extends StatelessWidget {
       AppRoutes.profile: (_) => const ProfileScreen(),
       AppRoutes.resources: (_) => const ResourcesScreen(),
       AppRoutes.requests: (_) => const RequestsScreen(),
-      AppRoutes.demoRequests: (_) => const DemoRequestsScreen(),
       AppRoutes.helpdesk: (_) => const CampusRequestPage(),
     },
     onGenerateRoute: (settings) {
@@ -260,7 +259,6 @@ class AppRoutes {
   static const profile = '/profile';
   static const resources = '/resources';
   static const requests = '/requests';
-  static const demoRequests = '/demo-requests';
   static const helpdesk = '/helpdesk';
 }
 
@@ -892,7 +890,7 @@ class CampusShell extends StatelessWidget {
         actions: [
           if (home)
             IconButton(
-              tooltip: 'My requests',
+              tooltip: 'All requests',
               icon: const Icon(Icons.inbox_outlined),
               onPressed: () =>
                   onNavigate?.call(AppRoutes.requests),
@@ -959,13 +957,8 @@ class CampusShell extends StatelessWidget {
                 ),
                 (
                 AppRoutes.requests,
-                'My requests',
+                'All requests',
                 Icons.inbox_outlined
-                ),
-                (
-                AppRoutes.demoRequests,
-                'Demo requests',
-                Icons.groups_outlined
                 ),
               ])
                 ListTile(
@@ -1391,14 +1384,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                 onTap: () => openNamed(AppRoutes.resources),
               ),
               ActionTile(
-                title: 'Demo requests',
-                subtitle: 'Five fictional student records on every device',
-                icon: Icons.groups_outlined,
-                onTap: () => openNamed(AppRoutes.demoRequests),
-              ),
-              ActionTile(
-                title: 'My requests',
-                subtitle: 'View your server-confirmed requests',
+                title: 'All requests',
+                subtitle: 'View submitted requests from every device',
                 icon: Icons.inbox_outlined,
                 onTap: () => openNamed(AppRoutes.requests),
               ),
@@ -2296,238 +2283,7 @@ class _ResourcesScreenState extends State<ResourcesScreen> {
   );
 }
 
-// MY REQUESTS: server records are fetched with an owner-restricted query.
-
-// Public teaching fixtures are isolated from private campusRequests.
-const List<Map<String, dynamic>> publicDemoFixtures = [
-  {
-    "studentName": "Mira Sadykova",
-    "studentId": "I26043001",
-    "email": "mira.demo@iitu.edu.kz",
-    "serviceCategory": "IT support",
-    "subject": "Cannot connect to campus Wi-Fi",
-    "description": "My laptop cannot connect to the campus Wi-Fi. I tried restarting it, but the connection still does not work. Please help me connect.",
-    "urgency": "Normal",
-    "location": "",
-    "phone": "",
-    "preferredContact": "Email",
-    "declaration": true,
-    "status": "submitted"
-  },
-  {
-    "studentName": "Ali Karimov",
-    "studentId": "I26043002",
-    "email": "ali.demo@iitu.edu.kz",
-    "serviceCategory": "Library",
-    "subject": "Unable to access the digital library",
-    "description": "I cannot access the digital library with my student account. An error appears when I try to open academic articles for my assignment.",
-    "urgency": "Normal",
-    "location": "",
-    "phone": "",
-    "preferredContact": "Email",
-    "declaration": true,
-    "status": "submitted"
-  },
-  {
-    "studentName": "Dana Omarova",
-    "studentId": "I26043003",
-    "email": "dana.demo@iitu.edu.kz",
-    "serviceCategory": "Career Center",
-    "subject": "Request for CV review",
-    "description": "I am preparing to apply for a summer internship. I would like to book a consultation to review my CV and improve my application.",
-    "urgency": "Low",
-    "location": "",
-    "phone": "",
-    "preferredContact": "Email",
-    "declaration": true,
-    "status": "submitted"
-  },
-  {
-    "studentName": "Arman Bekov",
-    "studentId": "I26043004",
-    "email": "arman.demo@iitu.edu.kz",
-    "serviceCategory": "Facilities",
-    "subject": "Projector is not working in Room 305",
-    "description": "The projector in Room 305 does not display an image when connected to a laptop. We need it for a class presentation. Please check the equipment.",
-    "urgency": "High",
-    "location": "Room 305, Main Building",
-    "phone": "",
-    "preferredContact": "Email",
-    "declaration": true,
-    "status": "submitted"
-  },
-  {
-    "studentName": "Amina Nurova",
-    "studentId": "I26043005",
-    "email": "amina.demo@iitu.edu.kz",
-    "serviceCategory": "Academic support",
-    "subject": "Two classes overlap in my timetable",
-    "description": "Two courses appear at the same time in my timetable. I would like help checking my course registration and resolving this schedule conflict.",
-    "urgency": "Normal",
-    "location": "",
-    "phone": "",
-    "preferredContact": "Email",
-    "declaration": true,
-    "status": "submitted"
-  }
-];
-
-class DemoRequestsScreen extends StatefulWidget {
-  const DemoRequestsScreen({super.key});
-  @override
-  State<DemoRequestsScreen> createState() => _DemoRequestsScreenState();
-}
-
-class _DemoRequestsScreenState extends State<DemoRequestsScreen> {
-  bool seeding = false;
-  String? seedError;
-  late Future<List<CloudRequest>> records = loadRecords();
-
-  Future<List<CloudRequest>> loadRecords() async {
-    // Always obtain the common records from the backend, not local storage.
-    final snapshot = await FirebaseFirestore.instance
-        .collection('demoCampusRequests')
-        .get(const GetOptions(source: Source.server))
-        .timeout(const Duration(seconds: 20));
-    final result = snapshot.docs
-        .map((doc) => CloudRequest(doc.id, doc.data())).toList();
-    result.sort((a, b) => a.id.compareTo(b.id));
-    return result;
-  }
-
-  Future<void> seedFixtures() async {
-    if (seeding) return;
-    setState(() { seeding = true; seedError = null; });
-    try {
-      final auth = FirebaseAuth.instance;
-      if (auth.currentUser == null) await auth.signInAnonymously();
-      final collection = FirebaseFirestore.instance.collection('demoCampusRequests');
-      for (var i = 0; i < publicDemoFixtures.length; i++) {
-        // Stable IDs and create-only rules prevent duplicates or overwrites.
-        final ref = collection.doc('demo_${i + 1}');
-        final existing = await ref.get(const GetOptions(source: Source.server));
-        if (!existing.exists) {
-          try {
-            await ref.set({
-              ...publicDemoFixtures[i],
-              'preferredDate': Timestamp.fromDate(DateTime.utc(2026, 10, 23)),
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-          } on FirebaseException {
-            // Another visitor may have created the same fixture concurrently.
-            final confirmed = await ref.get(const GetOptions(source: Source.server));
-            if (!confirmed.exists) rethrow;
-          }
-        }
-      }
-    } catch (error) {
-      if (mounted) seedError = firebaseMessage(error);
-    } finally {
-      if (mounted) setState(() { seeding = false; records = loadRecords(); });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => CampusShell(
-    title: 'Demo requests',
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        pageTitle('Five students. Five campus requests.',
-            'Fictional teaching records shared across devices through Cloud Firestore.'),
-        const Panel(child: Text(
-            'These are public fictional examples. Personal requests remain in My requests.')),
-        const SizedBox(height: 16),
-        Wrap(spacing: 12, runSpacing: 12, children: [
-          OutlinedButton.icon(
-            onPressed: seeding ? null : () => setState(() => records = loadRecords()),
-            icon: const Icon(Icons.refresh),
-            label: const Text('Refresh from server'),
-          ),
-          OutlinedButton.icon(
-            onPressed: () => Navigator.pushNamed(context, AppRoutes.requests),
-            icon: const Icon(Icons.inbox_outlined),
-            label: const Text('My requests'),
-          ),
-        ]),
-        if (seedError != null) ...[
-          const SizedBox(height: 16),
-          Text(seedError!, style: const TextStyle(color: Colors.red)),
-        ],
-        const SizedBox(height: 20),
-        FutureBuilder<List<CloudRequest>>(
-          future: records,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Panel(child: Text('Could not load demo records. '
-                  '${firebaseMessage(snapshot.error!)}'));
-            }
-            final items = snapshot.data ?? [];
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('${items.length} shared student records',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 12),
-                if (items.length < 5)
-                  Panel(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Save the five fictional examples once. '
-                          'After server confirmation, every device loads the same records.'),
-                      const SizedBox(height: 12),
-                      FilledButton.icon(
-                        onPressed: seeding ? null : seedFixtures,
-                        icon: const Icon(Icons.cloud_upload_outlined),
-                        label: Text(seeding ? 'Saving examples…' : 'Save 5 fictional examples'),
-                      ),
-                    ],
-                  )),
-                for (final item in items)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Panel(child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text('${item.data['studentName'] ?? ''}',
-                            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 4),
-                        SelectableText('Student ID: ${item.data['studentId'] ?? ''}'),
-                        const SizedBox(height: 12),
-                        Text('${item.data['subject'] ?? ''}',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 8),
-                        Text('${item.data['serviceCategory']} · ${item.data['status']}'),
-                        const SizedBox(height: 8),
-                        SelectableText('Reference: ${item.id}'),
-                        const SizedBox(height: 12),
-                        ExpansionTile(
-                          tilePadding: EdgeInsets.zero,
-                          title: const Text('View saved details'),
-                          children: [
-                            for (final entry in requestSummary(item.id, item.data).entries)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 12),
-                                child: Align(alignment: Alignment.centerLeft,
-                                    child: SelectableText('${entry.key}: ${entry.value}')),
-                              ),
-                          ],
-                        ),
-                      ],
-                    )),
-                  ),
-              ],
-            );
-          },
-        ),
-      ],
-    ),
-  );
-}
-
+// Shared submitted requests, retrieved from Cloud Firestore.
 class RequestsScreen extends StatefulWidget {
   const RequestsScreen({super.key});
 
@@ -2537,7 +2293,7 @@ class RequestsScreen extends StatefulWidget {
 
 class _RequestsScreenState extends State<RequestsScreen>
     with RouteGuard<RequestsScreen> {
-  late Future<List<CloudRequest>> records = requestStore.listMine();
+  late Future<List<CloudRequest>> records = requestStore.listAll();
   final lookup = TextEditingController();
 
   @override
@@ -2549,19 +2305,19 @@ class _RequestsScreenState extends State<RequestsScreen>
   Future<void> createRequest() async {
     await openNamed(AppRoutes.helpdesk);
     if (mounted) {
-      setState(() => records = requestStore.listMine());
+      setState(() => records = requestStore.listAll());
     }
   }
 
   @override
   Widget build(BuildContext context) => CampusShell(
-    title: 'My requests',
+    title: 'All requests',
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         pageTitle(
           'Support, with a clear record.',
-          'Your server-confirmed requests from Cloud Firestore. '
+          'Submitted requests shared across devices through Cloud Firestore. '
               'Educational prototype; requests are not sent to IITU staff.',
         ),
         Wrap(
@@ -2575,15 +2331,10 @@ class _RequestsScreenState extends State<RequestsScreen>
             ),
             OutlinedButton.icon(
               onPressed: () {
-                setState(() => records = requestStore.listMine());
+                setState(() => records = requestStore.listAll());
               },
               icon: const Icon(Icons.refresh),
               label: const Text('Refresh from server'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.pushNamed(context, AppRoutes.demoRequests),
-              icon: const Icon(Icons.groups_outlined),
-              label: const Text('Demo requests'),
             ),
           ],
         ),
@@ -2646,7 +2397,7 @@ class _RequestsScreenState extends State<RequestsScreen>
                   children: [
                     CircularProgressIndicator(),
                     SizedBox(height: 16),
-                    Text('Loading your records from the server…'),
+                    Text('Loading shared records from the server…'),
                   ],
                 ),
               );
@@ -3728,7 +3479,7 @@ class _CampusRequestPageState extends State<CampusRequestPage> {
                           if (submitted)
                             const Text(
                               'Server confirmed. The saved document '
-                                  'is available in My requests. '
+                                  'is available in All requests. '
                                   'Reset to start a new request.',
                               style: TextStyle(
                                 color: Color(0xFF207348),
@@ -3963,7 +3714,7 @@ class CampusRequestStore extends ChangeNotifier {
       }
     } catch (_) {
       error = 'The retained request could not be restored. '
-          'Check My requests before making another submission.';
+          'Check All requests before making another submission.';
       phase = RequestPhase.checkRequired;
     }
 
@@ -4118,10 +3869,6 @@ class CampusRequestStore extends ChangeNotifier {
 
     final data = result.data()!;
 
-    if (data['ownerUid'] != uid) {
-      throw StateError('This record belongs to a different account.');
-    }
-
     if (data['createdAt'] is! Timestamp ||
         result.metadata.hasPendingWrites) {
       throw StateError(
@@ -4217,10 +3964,9 @@ class CampusRequestStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<List<CloudRequest>> listMine() async {
-    // Rules do not filter unrestricted queries: constrain by owner UID.
+  Future<List<CloudRequest>> listAll() async {
+    // The teaching request board is shared across devices.
     final snapshot = await collection
-        .where('ownerUid', isEqualTo: uid)
         .get(const GetOptions(source: Source.server))
         .timeout(const Duration(seconds: 20));
 
