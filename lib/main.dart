@@ -2295,10 +2295,217 @@ class _RequestsScreenState extends State<RequestsScreen>
     with RouteGuard<RequestsScreen> {
   late Future<List<CloudRequest>> records = requestStore.listAll();
   final lookup = TextEditingController();
+  final nameSearch = TextEditingController();
+  DateTimeRange? submittedRange;
+  String categoryFilter = '';
+  String urgencyFilter = '';
+  String sortOrder = 'newest';
+
+  static const requestCategories = <String>[
+    'IT support', 'Library', 'Career Center', 'Facilities',
+    'Student activities', 'Academic support',
+  ];
+
+  String normalizeName(String value) =>
+      value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  String displayDate(DateTime value) =>
+      '${value.day.toString().padLeft(2, '0')}/'
+          '${value.month.toString().padLeft(2, '0')}/${value.year}';
+
+  String submittedLabel(CloudRequest request) {
+    final value = request.data['createdAt'];
+    return value is Timestamp
+        ? displayDate(value.toDate().toLocal())
+        : 'Date unavailable';
+  }
+
+  bool matchesFilters(CloudRequest request) {
+    final query = normalizeName(nameSearch.text);
+    final searchableFields = <String>[
+      '${request.data['studentName'] ?? ''}',
+      '${request.data['studentId'] ?? ''}',
+      '${request.data['subject'] ?? ''}',
+      request.id,
+    ].map(normalizeName).toList();
+    if (query.isNotEmpty &&
+        !query.split(' ').every((term) =>
+            searchableFields.any((field) => field.contains(term)))) return false;
+    if (categoryFilter.isNotEmpty &&
+        request.data['serviceCategory'] != categoryFilter) return false;
+    if (urgencyFilter.isNotEmpty &&
+        request.data['urgency'] != urgencyFilter) return false;
+
+    final range = submittedRange;
+    if (range == null) return true;
+    final timestamp = request.data['createdAt'];
+    if (timestamp is! Timestamp) return false;
+    final submitted = timestamp.toDate().toLocal();
+    final firstDay = DateUtils.dateOnly(range.start);
+    // Exclusive next-day boundary includes every time on the selected end date.
+    final afterLastDay = DateTime(
+      range.end.year, range.end.month, range.end.day + 1,
+    );
+    return !submitted.isBefore(firstDay) && submitted.isBefore(afterLastDay);
+  }
+
+  Future<void> chooseSubmittedDates() async {
+    final selected = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(1970),
+      lastDate: DateTime(2100, 12, 31),
+      initialDateRange: submittedRange,
+      helpText: 'Filter by submission date',
+      saveText: 'Apply dates',
+    );
+    if (!mounted || selected == null) return;
+    setState(() => submittedRange = selected);
+  }
+
+  void clearRequestFilters() {
+    nameSearch.clear();
+    setState(() {
+      submittedRange = null;
+      categoryFilter = '';
+      urgencyFilter = '';
+      sortOrder = 'newest';
+    });
+  }
+
+  int compareRequests(CloudRequest a, CloudRequest b) {
+    final aDate = a.data['createdAt'];
+    final bDate = b.data['createdAt'];
+    final byDate = aDate is Timestamp && bDate is Timestamp
+        ? aDate.compareTo(bDate) : 0;
+    int order;
+    switch (sortOrder) {
+      case 'oldest':
+        order = byDate;
+        break;
+      case 'name':
+        order = normalizeName('${a.data['studentName'] ?? ''}')
+            .compareTo(normalizeName('${b.data['studentName'] ?? ''}'));
+        break;
+      default:
+        order = -byDate;
+    }
+    return order == 0 ? a.id.compareTo(b.id) : order;
+  }
+
+  Widget filterSelect({
+    required String label,
+    required String value,
+    required Map<String, String> options,
+    required ValueChanged<String> onChanged,
+  }) => SizedBox(
+    width: 250,
+    child: InputDecorator(
+      decoration: InputDecoration(labelText: label),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isExpanded: true,
+          isDense: true,
+          items: options.entries.map((entry) => DropdownMenuItem<String>(
+            value: entry.key,
+            child: Text(entry.value, overflow: TextOverflow.ellipsis),
+          )).toList(),
+          onChanged: (selected) {
+            if (selected != null) onChanged(selected);
+          },
+        ),
+      ),
+    ),
+  );
+
+  Widget requestFilters() => Panel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text('Find requests',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        const SizedBox(height: 12),
+        TextField(
+          controller: nameSearch,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            labelText: 'Search requests',
+            hintText: 'Name, Student ID, subject or reference',
+            prefixIcon: const Icon(Icons.search),
+            suffixIcon: nameSearch.text.isEmpty ? null : IconButton(
+              tooltip: 'Clear search',
+              onPressed: () {
+                nameSearch.clear();
+                setState(() {});
+              },
+              icon: const Icon(Icons.close),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 16,
+          children: [
+            filterSelect(
+              label: 'Category',
+              value: categoryFilter,
+              options: {'': 'All categories',
+                for (final category in requestCategories) category: category},
+              onChanged: (value) => setState(() => categoryFilter = value),
+            ),
+            filterSelect(
+              label: 'Urgency',
+              value: urgencyFilter,
+              options: const {'': 'All urgency levels',
+                'High': 'High', 'Normal': 'Normal', 'Low': 'Low'},
+              onChanged: (value) => setState(() => urgencyFilter = value),
+            ),
+            filterSelect(
+              label: 'Sort by',
+              value: sortOrder,
+              options: const {'newest': 'Newest first',
+                'oldest': 'Oldest first', 'name': 'Student name (A–Z)'},
+              onChanged: (value) => setState(() => sortOrder = value),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            OutlinedButton.icon(
+              onPressed: chooseSubmittedDates,
+              icon: const Icon(Icons.date_range_outlined),
+              label: Text(submittedRange == null
+                  ? 'Submission date: all dates'
+                  : '${displayDate(submittedRange!.start)} - '
+                  '${displayDate(submittedRange!.end)}'),
+            ),
+            if (submittedRange != null)
+              TextButton.icon(
+                onPressed: () => setState(() => submittedRange = null),
+                icon: const Icon(Icons.close),
+                label: const Text('Clear dates'),
+              ),
+            TextButton.icon(
+              onPressed: clearRequestFilters,
+              icon: const Icon(Icons.filter_alt_off_outlined),
+              label: const Text('Reset filters'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text('All filters work together. Submission dates use this device’s time zone.'),
+      ],
+    ),
+  );
 
   @override
   void dispose() {
     lookup.dispose();
+    nameSearch.dispose();
     super.dispose();
   }
 
@@ -2388,6 +2595,8 @@ class _RequestsScreenState extends State<RequestsScreen>
           ),
         ),
         const SizedBox(height: 24),
+        requestFilters(),
+        const SizedBox(height: 24),
         FutureBuilder<List<CloudRequest>>(
           future: records,
           builder: (context, snapshot) {
@@ -2412,9 +2621,11 @@ class _RequestsScreenState extends State<RequestsScreen>
               );
             }
 
-            final requests = snapshot.data ?? [];
+            final allRequests = snapshot.data ?? <CloudRequest>[];
+            final requests = allRequests.where(matchesFilters).toList()
+              ..sort(compareRequests);
 
-            if (requests.isEmpty) {
+            if (allRequests.isEmpty) {
               return const Panel(
                 child: Text(
                   'No server-confirmed requests yet. '
@@ -2423,8 +2634,35 @@ class _RequestsScreenState extends State<RequestsScreen>
               );
             }
 
+            if (requests.isEmpty) {
+              return Panel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text('Showing 0 of ${allRequests.length} requests'),
+                    const SizedBox(height: 12),
+                    const Text('No requests match these filters. Try another search or reset the filters.'),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: clearRequestFilters,
+                        child: const Text('Reset filters'),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
             return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text('Showing ${requests.length} of '
+                      '${allRequests.length} requests'),
+                ),
                 for (final request in requests)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16),
@@ -2462,6 +2700,9 @@ class _RequestsScreenState extends State<RequestsScreen>
                             '${request.data['serviceCategory']} · '
                                 '${request.data['status']}',
                           ),
+                          const SizedBox(height: 8),
+                          Text('Submitted: ${submittedLabel(request)} · '
+                              'Urgency: ${request.data['urgency'] ?? 'Not provided'}'),
                           const SizedBox(height: 16),
                           Align(
                             alignment: Alignment.centerLeft,
