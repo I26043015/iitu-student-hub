@@ -9,6 +9,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'firebase_options.dart';
+import 'models/campus_content.dart';
+import 'screens/announcements_screen.dart';
 
 const red = Color(0xFFAD232C);
 const ink = Color(0xFF18191C);
@@ -210,6 +212,9 @@ class IituApp extends StatelessWidget {
     initialRoute: AppRoutes.home,
     routes: {
       AppRoutes.home: (_) => const DashboardScreen(),
+      AppRoutes.announcements: (_) => AnnouncementsScreen(
+        savedIds: hub.announcementBookmarks,
+      ),
       AppRoutes.timetable: (_) => const TimetableScreen(),
       AppRoutes.services: (_) => const ServicesScreen(),
       AppRoutes.events: (_) => const EventsScreen(),
@@ -251,6 +256,7 @@ class IituApp extends StatelessWidget {
 
 class AppRoutes {
   static const home = '/';
+  static const announcements = '/announcements';
   static const timetable = '/timetable';
   static const services = '/services';
   static const serviceDetail = '/service-detail';
@@ -260,28 +266,6 @@ class AppRoutes {
   static const resources = '/resources';
   static const requests = '/requests';
   static const helpdesk = '/helpdesk';
-}
-
-class CampusService {
-  const CampusService(
-      this.id,
-      this.name,
-      this.description,
-      this.location,
-      this.openingHours,
-      this.contact,
-      this.icon,
-      this.status,
-      );
-
-  final String id;
-  final String name;
-  final String description;
-  final String location;
-  final String openingHours;
-  final String contact;
-  final IconData icon;
-  final String status;
 }
 
 class CampusEvent {
@@ -354,76 +338,7 @@ class ServiceResult {
   final String reference;
 }
 
-// Campus content below is sample data for the teaching prototype.
-const campusServices = [
-  CampusService(
-    'it',
-    'IT support',
-    'Get guidance on campus Wi-Fi, account access '
-        'and safe use of student devices.',
-    'Sample: Main building, room 204',
-    'Sample: Mon–Fri, 09:00–18:00',
-    'it-support@example.edu',
-    Icons.wifi_outlined,
-    'Demo service',
-  ),
-  CampusService(
-    'library',
-    'Library',
-    'Ask about finding study materials, citation tools '
-        'and using library spaces.',
-    'Sample: Learning centre, level 2',
-    'Sample: Mon–Fri, 09:00–19:00',
-    'library@example.edu',
-    Icons.local_library_outlined,
-    'Demo service',
-  ),
-  CampusService(
-    'career',
-    'Career Center',
-    'Prepare your CV, plan an internship search '
-        'and practise for interviews.',
-    'Sample: Student centre, room 105',
-    'Sample: Mon–Fri, 10:00–17:00',
-    'career@example.edu',
-    Icons.work_outline,
-    'Demo service',
-  ),
-  CampusService(
-    'facilities',
-    'Facilities',
-    'Report a classroom issue or request help '
-        'with campus equipment and spaces.',
-    'Sample: Main building, reception',
-    'Sample: Mon–Fri, 09:00–18:00',
-    'facilities@example.edu',
-    Icons.apartment_outlined,
-    'Demo service',
-  ),
-  CampusService(
-    'activities',
-    'Student activities',
-    'Discover student communities, volunteering '
-        'and opportunities to organise an event.',
-    'Sample: Student space, level 1',
-    'Sample: Mon–Fri, 10:00–17:00',
-    'activities@example.edu',
-    Icons.groups_outlined,
-    'Demo service',
-  ),
-  CampusService(
-    'academic',
-    'Academic support',
-    'Ask for guidance on study planning, course choices '
-        'and academic enquiries.',
-    'Sample: Academic office, room 301',
-    'Sample: Mon–Fri, 09:00–17:00',
-    'academic@example.edu',
-    Icons.school_outlined,
-    'Demo service',
-  ),
-];
-
+// Campus events below are demonstration data.
 const campusEvents = [
   CampusEvent(
     'security',
@@ -528,6 +443,8 @@ const campusResources = [
 ];
 
 class HubData extends ChangeNotifier {
+  // Session bookmarks are shared with the mounted announcement route.
+  final Set<String> announcementBookmarks = <String>{};
   final storage = SharedPreferencesAsync();
 
   String name = 'Azhar Akhmetova';
@@ -931,6 +848,11 @@ class CampusShell extends StatelessWidget {
               ),
               for (final item in [
                 (
+                AppRoutes.announcements,
+                'Announcements',
+                Icons.campaign_outlined
+                ),
+                (
                 AppRoutes.timetable,
                 'Timetable',
                 Icons.calendar_month_outlined
@@ -1307,6 +1229,12 @@ class _DashboardScreenState extends State<DashboardScreen>
             responsiveGrid(
               [
                 ActionTile(
+                  title: 'Announcements',
+                  subtitle: 'Read campus notices and bookmark updates',
+                  icon: Icons.campaign_outlined,
+                  onTap: () => openNamed(AppRoutes.announcements),
+                ),
+                ActionTile(
                   title: 'Timetable',
                   subtitle: 'Plan your study week',
                   icon: Icons.calendar_month_outlined,
@@ -1556,123 +1484,141 @@ class _ServicesScreenState extends State<ServicesScreen>
 
   Future<void> details(CampusService service) async {
     final result = await openNamed<ServiceResult>(
-      AppRoutes.serviceDetail,
+      service.destination,
       arguments: service,
     );
-
     if (!mounted || result == null) return;
-
-    notify(
-      context,
-      '${result.service}: demo appointment interest recorded '
-          '(${result.reference}).',
-    );
+    notify(context, '${result.service}: demo appointment interest recorded '
+        '(${result.reference}).');
   }
+
+  bool matches(CampusService service) =>
+      '${service.label} ${service.description}'.toLowerCase().contains(query);
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: hub,
-    builder: (_, _) => CampusShell(
-      title: 'Campus services',
-      controller: scroll,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          pageTitle(
-            'Find the right people.',
-            'Explore sample campus services. '
-                'Open a service to see its own details.',
-          ),
-          // Keeping this route preserves its search and scroll position.
-          TextField(
-            controller: search,
-            onChanged: (v) =>
-                setState(() => query = v.toLowerCase().trim()),
-            decoration: const InputDecoration(
-              labelText: 'Search campus services',
-              hintText: 'Library, IT, career…',
-              prefixIcon: Icon(Icons.search),
-            ),
-          ),
-          const SizedBox(height: 24),
-          if (!campusServices.any(
-                (s) => '${s.name} ${s.description}'
-                .toLowerCase()
-                .contains(query),
-          ))
-            const Panel(
-              child: Text(
-                'No matching services. Try a different keyword.',
+    builder: (_, _) {
+      final visible = campusServices.where(matches).toList();
+      final additional = additionalCampusServices.where(matches).toList();
+      return CampusShell(
+        title: 'Campus services',
+        controller: scroll,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            pageTitle('Find the right people.',
+                'Demonstration data — six campus services with matching details.'),
+            TextField(
+              controller: search,
+              onChanged: (value) => setState(() => query = value.toLowerCase().trim()),
+              decoration: InputDecoration(
+                labelText: 'Search campus services',
+                hintText: 'Library, counselling, sports…',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: query.isEmpty ? null : IconButton(
+                  tooltip: 'Clear service search',
+                  icon: const Icon(Icons.close),
+                  onPressed: () { search.clear(); setState(() => query = ''); },
+                ),
               ),
             ),
-          responsiveGrid([
-            for (final service in campusServices)
-              if ('${service.name} ${service.description}'
-                  .toLowerCase()
-                  .contains(query))
-                Panel(
-                  padding: 20,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Hero(
-                        tag: 'service-${service.id}',
-                        child: Material(
-                          color: Colors.transparent,
-                          child: Container(
-                            width: 54,
-                            height: 54,
-                            decoration: BoxDecoration(
-                              color: bg,
-                              borderRadius:
-                              BorderRadius.circular(14),
-                            ),
-                            child: Icon(
-                              service.icon,
-                              color: red,
-                              size: 28,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        service.name,
-                        style: const TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        service.description,
-                        style: const TextStyle(color: muted),
-                      ),
-                      const SizedBox(height: 18),
-                      if (hub.appointments.contains(service.id))
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 10),
-                          child: Text(
-                            'Demo interest saved',
-                            style: TextStyle(
-                              color: red,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      OutlinedButton.icon(
-                        onPressed: () => details(service),
-                        icon: const Icon(
-                          Icons.arrow_outward,
-                          size: 18,
-                        ),
-                        label: const Text('View service'),
-                      ),
-                    ],
-                  ),
-                ),
-          ]),
-        ],
+            const SizedBox(height: 24),
+            if (visible.isEmpty && additional.isEmpty)
+              const Panel(child: Text('No matching services. Try a different keyword.')),
+            if (visible.isNotEmpty)
+              CampusServicesGrid(services: visible, onSelected: details),
+            if (additional.isNotEmpty) ...[
+              const SizedBox(height: 28),
+              sectionTitle('More campus support'),
+              for (final service in additional)
+                Card(child: ListTile(
+                  leading: Icon(service.icon, color: red),
+                  title: Text(service.label),
+                  subtitle: Text(service.description),
+                  onTap: () => details(service),
+                )),
+            ],
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class CampusServicesGrid extends StatelessWidget {
+  const CampusServicesGrid({super.key,
+    required this.services, required this.onSelected});
+  final List<CampusService> services;
+  final ValueChanged<CampusService> onSelected;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final columns = constraints.maxWidth >= 700 ? 4
+          : constraints.maxWidth >= 420 ? 3 : 2;
+      final tileWidth = (constraints.maxWidth - 12 * (columns - 1)) / columns;
+      const labelStyle = TextStyle(fontSize: 16, fontWeight: FontWeight.w700);
+      var maxLabelHeight = 0.0;
+      for (final service in services) {
+        final painter = TextPainter(
+          text: TextSpan(text: service.label, style: labelStyle),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: (tileWidth - 32).clamp(1.0, double.infinity).toDouble());
+        if (painter.height > maxLabelHeight) maxLabelHeight = painter.height;
+        painter.dispose();
+      }
+      // Measured text height avoids clipping when accessibility text is enlarged.
+      final tileHeight = (maxLabelHeight + 96).clamp(156.0, double.infinity).toDouble();
+      return GridView.builder(
+        key: const ValueKey('campus-services-grid'),
+        shrinkWrap: true,
+        primary: false,
+        physics: const NeverScrollableScrollPhysics(),
+        itemCount: services.length,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: columns,
+          mainAxisSpacing: 12, crossAxisSpacing: 12,
+          mainAxisExtent: tileHeight,
+        ),
+        itemBuilder: (context, index) => ServiceTile(
+          service: services[index],
+          onTap: () => onSelected(services[index]),
+        ),
+      );
+    },
+  );
+}
+
+class ServiceTile extends StatelessWidget {
+  const ServiceTile({super.key, required this.service, required this.onTap});
+  final CampusService service;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    key: ValueKey('service-tile-${service.id}'),
+    margin: EdgeInsets.zero,
+    clipBehavior: Clip.antiAlias,
+    child: Semantics(
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Hero(tag: 'service-${service.id}',
+                  child: Material(color: Colors.transparent,
+                      child: Icon(service.icon, size: 36, color: red))),
+              const SizedBox(height: 12),
+              Text(service.label, textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
       ),
     ),
   );
@@ -4512,3 +4458,4 @@ final Uint8List logoBytes = base64Decode(logoBase64);
 
 const String logoBase64 =
     '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';
+
