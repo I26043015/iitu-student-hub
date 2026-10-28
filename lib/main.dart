@@ -11,6 +11,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'firebase_options.dart';
 import 'models/campus_content.dart';
 import 'screens/announcements_screen.dart';
+import 'models/facility_booking.dart';
+import 'screens/booking_screen.dart';
 
 const red = Color(0xFFAD232C);
 const ink = Color(0xFF18191C);
@@ -136,8 +138,16 @@ class _FirebaseStartupState extends State<FirebaseStartup> {
   );
 }
 
-class IituApp extends StatelessWidget {
+class IituApp extends StatefulWidget {
   const IituApp({super.key});
+
+  @override
+  State<IituApp> createState() => _IituAppState();
+}
+
+class _IituAppState extends State<IituApp> {
+  // App-owned, session-only state. Opening/closing routes preserves bookings.
+  final List<Booking> confirmedBookings = <Booking>[];
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -215,6 +225,7 @@ class IituApp extends StatelessWidget {
       AppRoutes.announcements: (_) => AnnouncementsScreen(
         savedIds: hub.announcementBookmarks,
       ),
+      AppRoutes.booking: (_) => BookingScreen(confirmedBookings: confirmedBookings),
       AppRoutes.timetable: (_) => const TimetableScreen(),
       AppRoutes.services: (_) => const ServicesScreen(),
       AppRoutes.events: (_) => const EventsScreen(),
@@ -257,6 +268,7 @@ class IituApp extends StatelessWidget {
 class AppRoutes {
   static const home = '/';
   static const announcements = '/announcements';
+  static const booking = '/booking';
   static const timetable = '/timetable';
   static const services = '/services';
   static const serviceDetail = '/service-detail';
@@ -853,6 +865,11 @@ class CampusShell extends StatelessWidget {
                 Icons.campaign_outlined
                 ),
                 (
+                AppRoutes.booking,
+                'Facility booking',
+                Icons.event_available_outlined
+                ),
+                (
                 AppRoutes.timetable,
                 'Timetable',
                 Icons.calendar_month_outlined
@@ -1233,6 +1250,12 @@ class _DashboardScreenState extends State<DashboardScreen>
                   subtitle: 'Read campus notices and bookmark updates',
                   icon: Icons.campaign_outlined,
                   onTap: () => openNamed(AppRoutes.announcements),
+                ),
+                ActionTile(
+                  title: 'Facility booking',
+                  subtitle: 'Reserve a campus space and review your booking',
+                  icon: Icons.event_available_outlined,
+                  onTap: () => openNamed(AppRoutes.booking),
                 ),
                 ActionTile(
                   title: 'Timetable',
